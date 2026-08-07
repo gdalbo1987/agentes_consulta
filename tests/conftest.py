@@ -209,10 +209,19 @@ def sessao(engine):
 
 @pytest.fixture
 def tenant(sessao):
-    """A organização única. Invariante 1: existe exatamente uma."""
+    """A organização única. Invariante 1: existe exatamente uma.
+
+    Idempotente de propósito. O banco de teste é compartilhado pela sessão
+    inteira, e os testes do orquestrador COMITAM a organização (eles precisam
+    dela visível em sessões separadas, porque o código sob teste abre a sua
+    própria). Sem a checagem, esta fixture tentaria inserir um id=1 que já
+    existe e derrubaria todo o arquivo de schema conforme a ordem de execução.
+    """
     from sales_support_agent.models import Tenant
 
-    linha = Tenant(id=1, name="Coester")
-    sessao.add(linha)
-    sessao.commit()
+    linha = sessao.get(Tenant, 1)
+    if linha is None:
+        linha = Tenant(id=1, name="Coester")
+        sessao.add(linha)
+        sessao.commit()
     return linha
