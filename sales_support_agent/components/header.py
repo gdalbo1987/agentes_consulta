@@ -1,7 +1,7 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.components.gradient_button import gradient_button
-from prospect_agent.state import AppState
+from sales_support_agent.styles import colors
+from sales_support_agent.components.gradient_button import gradient_button
+from sales_support_agent.state import AppState
 
 def header() -> rx.Component:
     return rx.flex(

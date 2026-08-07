@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime
 from typing import List, Optional, Tuple
 
-from prospect_agent.services.normalizers import normalizar_cnpj  # noqa: F401 (reexport)
+from sales_support_agent.services.normalizers import normalizar_cnpj  # noqa: F401 (reexport)
 
 # ---------------------------------------------------------------------------
 # Os 12 campos do contrato de enriquecimento. A ordem espelha o requisito de

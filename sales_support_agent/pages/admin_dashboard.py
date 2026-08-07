@@ -1,11 +1,11 @@
 import reflex as rx
-from prospect_agent.components.confirm_dialog import confirm_dialog, dialog_cancel_button
-from prospect_agent.components.dashboard_layout import dashboard_layout
-from prospect_agent.components.data_table import col, table_shell
-from prospect_agent.services.settings import EFFORTS_DISPONIVEIS, MODELOS_DISPONIVEIS
-from prospect_agent.state import HUNTER_SLOTS, AdminState, SettingsState
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import HEADING_FONT, BODY_FONT
+from sales_support_agent.components.confirm_dialog import confirm_dialog, dialog_cancel_button
+from sales_support_agent.components.dashboard_layout import dashboard_layout
+from sales_support_agent.components.data_table import col, table_shell
+from sales_support_agent.services.settings import EFFORTS_DISPONIVEIS, MODELOS_DISPONIVEIS
+from sales_support_agent.state import HUNTER_SLOTS, AdminState, SettingsState
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
 
 def admin_card(title: str, value, icon: str, subtitle=None) -> rx.Component:

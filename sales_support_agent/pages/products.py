@@ -1,8 +1,8 @@
 import reflex as rx
-from prospect_agent.components.dashboard_layout import dashboard_layout
-from prospect_agent.state import ProductState
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import HEADING_FONT, BODY_FONT
+from sales_support_agent.components.dashboard_layout import dashboard_layout
+from sales_support_agent.state import ProductState
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
 
 def _field_label(text: str) -> rx.Component:

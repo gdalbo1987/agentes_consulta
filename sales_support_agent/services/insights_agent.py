@@ -51,9 +51,9 @@ from openai.types.shared import Reasoning
 
 import reflex as rx
 
-from prospect_agent.models import ChatMessage, brt_now
-from prospect_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
-from prospect_agent.services.settings import get_agent_config
+from sales_support_agent.models import ChatMessage, brt_now
+from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
+from sales_support_agent.services.settings import get_agent_config
 
 try:
     from agents import set_tracing_disabled
@@ -250,7 +250,7 @@ def _nao_encontrada(nome_empresa: str) -> str:
 
 
 def _construir_tools(tenant_id: int) -> List[Any]:
-    from prospect_agent.services import dashboard_insights as di
+    from sales_support_agent.services import dashboard_insights as di
 
     @function_tool
     async def resumo_geral() -> str:

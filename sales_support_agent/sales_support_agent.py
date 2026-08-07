@@ -20,7 +20,7 @@ e o cadastro público foram descontinuados na conversão para uso interno.
 import reflex as rx
 
 # Importados pelo efeito colateral do @rx.page — cada módulo registra sua rota.
-from prospect_agent.pages import (  # noqa: F401
+from sales_support_agent.pages import (  # noqa: F401
     dashboard,
     enrichment,
     forgot_password,
@@ -32,11 +32,11 @@ from prospect_agent.pages import (  # noqa: F401
     reset_password,
     search_config,
 )
-from prospect_agent.pages.admin_dashboard import admin_dashboard
-from prospect_agent.pages.auth import auth_page
-from prospect_agent.pages.landing import landing_page
-from prospect_agent.state import AdminState, SettingsState
-from prospect_agent.styles.theme import BASE_STYLE
+from sales_support_agent.pages.admin_dashboard import admin_dashboard
+from sales_support_agent.pages.auth import auth_page
+from sales_support_agent.pages.landing import landing_page
+from sales_support_agent.state import AdminState, SettingsState
+from sales_support_agent.styles.theme import BASE_STYLE
 
 # O tema (claro, fixo) fica no `RadixThemesPlugin` em `rxconfig.py` — passá-lo
 # aqui como `theme=` está deprecado desde a 0.9.

@@ -23,8 +23,8 @@ from typing import Callable, Dict, Tuple
 
 import reflex as rx
 
-from prospect_agent.models import TokenPricing, brt_now
-from prospect_agent.services.settings import MODELOS_DISPONIVEIS
+from sales_support_agent.models import TokenPricing, brt_now
+from sales_support_agent.services.settings import MODELOS_DISPONIVEIS
 
 UM_MILHAO = 1_000_000
 

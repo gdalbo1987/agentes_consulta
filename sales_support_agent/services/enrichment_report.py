@@ -21,8 +21,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from prospect_agent.services.enrichment_rules import formatar_telefone
-from prospect_agent.services.normalizers import formatar_cnpj
+from sales_support_agent.services.enrichment_rules import formatar_telefone
+from sales_support_agent.services.normalizers import formatar_cnpj
 
 # Identidade visual do produto (mesmo azul do BTN_GRADIENT).
 _AZUL_CABECALHO = "1D548C"

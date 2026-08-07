@@ -33,16 +33,16 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import reflex as rx
 
-from prospect_agent.models import (
+from sales_support_agent.models import (
     CompanyContact,
     KipflowUsage,
     ProspectCompany,
     SearchRun,
     brt_now,
 )
-from prospect_agent.services import kipflow_client as kip
-from prospect_agent.services import receita_client as receita
-from prospect_agent.services.enrichment_rules import (
+from sales_support_agent.services import kipflow_client as kip
+from sales_support_agent.services import receita_client as receita
+from sales_support_agent.services.enrichment_rules import (
     AREAS_ALVO,
     DATASETS_EMPRESA,
     NIVEIS_SENIORIDADE,
@@ -61,7 +61,7 @@ from prospect_agent.services.enrichment_rules import (
     sigla_uf_de_localizacao,
     socio_para_contato,
 )
-from prospect_agent.services.normalizers import (
+from sales_support_agent.services.normalizers import (
     normalizar_cnpj,
     normalizar_dominio,
     normalizar_nome,
@@ -698,7 +698,7 @@ def _dominio_da_empresa(c: ProspectCompany) -> str:
     """Domínio para consultar o Hunter, na ordem em que a confiança cai:
     o `dominio` normalizado, depois o site confirmado no enriquecimento, e por
     último o que o agente de pesquisa achou."""
-    from prospect_agent.services import hunter_client as hunter
+    from sales_support_agent.services import hunter_client as hunter
 
     for candidato in (c.dominio, c.website_principal, c.website):
         dominio = hunter.normalizar_dominio(candidato or "")
@@ -778,7 +778,7 @@ async def _buscar_emails_dos_contatos(
     (todas as empresas já foram enriquecidas, esta etapa é posterior) e o
     andamento por contato vai na MENSAGEM.
     """
-    from prospect_agent.services import hunter_client as hunter
+    from sales_support_agent.services import hunter_client as hunter
 
     if not hunter.api_key_configurada():
         avisos.append(
@@ -867,8 +867,8 @@ def _aviso_de_cota(tenant_id: int, nao_buscados: int) -> str:
     aniversário da assinatura, e uma data concreta é o que permite ao usuário
     decidir se espera ou se aumenta o plano.
     """
-    from prospect_agent.services import hunter_client as hunter
-    from prospect_agent.services.settings import (
+    from sales_support_agent.services import hunter_client as hunter
+    from sales_support_agent.services.settings import (
         get_hunter_creditos_totais, get_hunter_dia_renovacao, slots_hunter_configurados,
     )
 

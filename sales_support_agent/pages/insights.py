@@ -1,10 +1,10 @@
 import reflex as rx
 
-from prospect_agent.components.confirm_dialog import confirm_dialog
-from prospect_agent.components.dashboard_layout import dashboard_layout
-from prospect_agent.state import InsightsState
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import BODY_FONT, HEADING_FONT
+from sales_support_agent.components.confirm_dialog import confirm_dialog
+from sales_support_agent.components.dashboard_layout import dashboard_layout
+from sales_support_agent.state import InsightsState
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import BODY_FONT, HEADING_FONT
 
 
 def _bubble(msg) -> rx.Component:

@@ -45,9 +45,9 @@ from pydantic import BaseModel
 from agents import Agent, ModelSettings, Runner, WebSearchTool
 from openai.types.shared import Reasoning
 
-from prospect_agent.models import brt_now
-from prospect_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
-from prospect_agent.services.settings import get_agent_config
+from sales_support_agent.models import brt_now
+from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
+from sales_support_agent.services.settings import get_agent_config
 
 try:  # Evita enviar traces para a OpenAI sem necessidade (mesmo padrão do product_agent).
     from agents import set_tracing_disabled

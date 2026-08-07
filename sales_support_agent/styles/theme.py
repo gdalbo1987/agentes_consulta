@@ -1,5 +1,5 @@
 import reflex as rx
-from prospect_agent.styles.colors import BG, TEXT_MAIN, HIGHLIGHT
+from sales_support_agent.styles.colors import BG, TEXT_MAIN, HIGHLIGHT
 
 # ... restante do código (custom_css, BASE_STYLE, etc)
 

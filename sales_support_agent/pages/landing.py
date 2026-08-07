@@ -1,10 +1,10 @@
 import reflex as rx
-from prospect_agent.components.header import header
-from prospect_agent.components.hero import hero
-from prospect_agent.components.advantages import advantages
-from prospect_agent.components.tutorial import tutorial
-from prospect_agent.components.footer import footer
-from prospect_agent.styles.theme import custom_css
+from sales_support_agent.components.header import header
+from sales_support_agent.components.hero import hero
+from sales_support_agent.components.advantages import advantages
+from sales_support_agent.components.tutorial import tutorial
+from sales_support_agent.components.footer import footer
+from sales_support_agent.styles.theme import custom_css
 
 def landing_page() -> rx.Component:
     return rx.box(

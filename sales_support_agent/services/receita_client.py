@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from prospect_agent.services.normalizers import normalizar_cnpj
+from sales_support_agent.services.normalizers import normalizar_cnpj
 
 TIMEOUT_SEGUNDOS = 20.0
 

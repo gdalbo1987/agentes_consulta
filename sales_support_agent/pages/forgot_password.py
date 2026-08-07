@@ -1,8 +1,8 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.state import ForgotPasswordState
-from prospect_agent.pages.auth import auth_input
-from prospect_agent.styles.typography import HEADING_FONT, BODY_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.state import ForgotPasswordState
+from sales_support_agent.pages.auth import auth_input
+from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
 
 @rx.page(route="/esqueci-senha", title="Recuperar Senha | Coester", on_load=ForgotPasswordState.load_forgot_password)

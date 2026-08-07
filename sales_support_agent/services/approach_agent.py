@@ -19,8 +19,8 @@ from pydantic import BaseModel
 from agents import Agent, ModelSettings, Runner
 from openai.types.shared import Reasoning
 
-from prospect_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
-from prospect_agent.services.settings import get_agent_config
+from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
+from sales_support_agent.services.settings import get_agent_config
 
 try:
     from agents import set_tracing_disabled
@@ -29,7 +29,7 @@ try:
 except Exception:  # pragma: no cover - compatibilidade entre versões do SDK
     pass
 
-from prospect_agent.services.priorizacao_agent import (  # noqa: E402
+from sales_support_agent.services.priorizacao_agent import (  # noqa: E402
     formatar_registro_lead,
     formatar_noticias,
 )

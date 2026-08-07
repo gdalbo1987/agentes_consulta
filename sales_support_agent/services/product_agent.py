@@ -34,7 +34,7 @@ from agents import (
 )
 from openai.types.shared import Reasoning
 
-from prospect_agent.services.settings import get_agent_config
+from sales_support_agent.services.settings import get_agent_config
 
 try:  # Evita enviar traces para a OpenAI sem necessidade.
     from agents import set_tracing_disabled

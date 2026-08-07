@@ -1,6 +1,6 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import HEADING_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import HEADING_FONT
 
 def step_circle(number: str, title: str, icon_tag: str) -> rx.Component:
     return rx.vstack(

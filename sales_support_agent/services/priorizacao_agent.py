@@ -29,8 +29,8 @@ from pydantic import BaseModel
 from agents import Agent, ModelSettings, Runner
 from openai.types.shared import Reasoning
 
-from prospect_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
-from prospect_agent.services.settings import get_agent_config
+from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
+from sales_support_agent.services.settings import get_agent_config
 
 try:  # Evita enviar traces para a OpenAI sem necessidade (mesmo padrão dos demais agentes).
     from agents import set_tracing_disabled
@@ -41,7 +41,7 @@ except Exception:  # pragma: no cover - compatibilidade entre versões do SDK
 
 # Critérios e pesos fixos — importados aqui só para interpolar no prompt.
 # A fonte única continua sendo priorizacao_rules.PESOS_CRITERIOS.
-from prospect_agent.services.priorizacao_rules import NOMES_CRITERIOS, PESOS_CRITERIOS  # noqa: E402
+from sales_support_agent.services.priorizacao_rules import NOMES_CRITERIOS, PESOS_CRITERIOS  # noqa: E402
 
 # `Literal[NOMES_CRITERIOS]` (NOMES_CRITERIOS é uma tupla de 7 strings) vira um
 # enum no JSON Schema entregue ao modelo — o próprio schema estruturado força

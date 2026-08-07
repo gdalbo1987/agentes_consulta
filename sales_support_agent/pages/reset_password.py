@@ -1,8 +1,8 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.state import ResetPasswordState
-from prospect_agent.pages.auth import auth_input
-from prospect_agent.styles.typography import HEADING_FONT, BODY_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.state import ResetPasswordState
+from sales_support_agent.pages.auth import auth_input
+from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
 
 def _invalid_token_view() -> rx.Component:

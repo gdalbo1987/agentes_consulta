@@ -29,9 +29,9 @@ from pydantic import BaseModel
 from agents import Agent, ModelSettings, Runner
 from openai.types.shared import Reasoning
 
-from prospect_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
-from prospect_agent.services.prospect_agent import EmpresaConhecidaInput
-from prospect_agent.services.settings import get_agent_config
+from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
+from sales_support_agent.services.prospect_agent import EmpresaConhecidaInput
+from sales_support_agent.services.settings import get_agent_config
 
 # Teto de empresas reincluídas numa rodada. Não é limite de negócio, é limite de
 # TEMPO: cada 5 empresas reincluídas viram um lote de notícias de até 5 minutos,
@@ -189,7 +189,7 @@ def _carregar_base(tenant_id: int) -> Tuple[List[EmpresaConhecida], Dict[int, Tu
     """
     import reflex as rx
 
-    from prospect_agent.models import ProspectCompany, SearchRun
+    from sales_support_agent.models import ProspectCompany, SearchRun
 
     with rx.session() as session:
         empresas = (

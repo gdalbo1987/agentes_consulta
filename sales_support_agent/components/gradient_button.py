@@ -1,7 +1,7 @@
 import reflex as rx
-from prospect_agent.styles import colors
+from sales_support_agent.styles import colors
 from typing import Optional, Any
-from prospect_agent.styles.typography import BODY_FONT
+from sales_support_agent.styles.typography import BODY_FONT
 
 def gradient_button(text: str, href: str = "", is_external: bool = False, on_click: Optional[Any] = None) -> rx.Component:
     # 1. Cria a base do botão (onde o on_click sempre funciona)

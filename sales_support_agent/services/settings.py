@@ -28,13 +28,13 @@ from typing import Optional
 
 import reflex as rx
 
-from prospect_agent.models import (
+from sales_support_agent.models import (
     AgentModelSetting,
     HunterAccount,
     IntegrationSetting,
     brt_now,
 )
-from prospect_agent.services import crypto
+from sales_support_agent.services import crypto
 
 # ---------------------------------------------------------------------------
 # Agentes de IA — modelo + reasoning effort

@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional
 
 import reflex as rx
 
-from prospect_agent.models import CompanyContact, ProspectCompany
-from prospect_agent.services.enrichment_rules import (
+from sales_support_agent.models import CompanyContact, ProspectCompany
+from sales_support_agent.services.enrichment_rules import (
     STATUS_CONSIDERADOS_ENRIQUECIDOS,
     bucket_faturamento,
 )
@@ -34,7 +34,7 @@ def _nomes_produtos_por_search_run(tenant_id: int) -> Dict[int, set]:
     convenção já usada para notícias, ver `services/enrichment.
     noticias_por_empresa`). Lido do JSON, não da tabela `Product` ao vivo, para
     continuar funcionando mesmo se o produto tiver sido excluído depois."""
-    from prospect_agent.models import SearchRun
+    from sales_support_agent.models import SearchRun
 
     with rx.session() as session:
         runs = session.query(SearchRun).filter(SearchRun.tenant_id == tenant_id).all()
@@ -326,7 +326,7 @@ def resumo_por_usuario(tenant_id: int) -> List[Dict[str, Any]]:
     """Métricas agregadas por usuário que COLETOU o lead (`user_email`), do
     maior para o menor número de leads. O nome vem de `User`; leads antigos,
     anteriores à coluna `user_email`, aparecem como "(não atribuído)"."""
-    from prospect_agent.models import User
+    from sales_support_agent.models import User
 
     empresas = _carregar_empresas(tenant_id)
     contatos = _contagem_de_contatos(tenant_id)
@@ -355,7 +355,7 @@ def encontrar_empresa(tenant_id: int, nome_empresa: str) -> Optional[ProspectCom
     pontuação — é como o usuário costuma identificar a empresa quando o nome
     tem grafias concorrentes.
     """
-    from prospect_agent.services.normalizers import apenas_digitos_cnpj, normalizar_nome
+    from sales_support_agent.services.normalizers import apenas_digitos_cnpj, normalizar_nome
 
     if not (nome_empresa or "").strip():
         return None
@@ -403,7 +403,7 @@ def ficha_do_lead(tenant_id: int, empresa: ProspectCompany) -> Dict[str, Any]:
     aqui — devolver a string crua obrigaria o modelo a fazer o parse, que é
     exatamente o tipo de tarefa em que ele erra em silêncio.
     """
-    from prospect_agent.models import User
+    from sales_support_agent.models import User
 
     with rx.session() as session:
         contatos = (

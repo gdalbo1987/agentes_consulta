@@ -16,7 +16,7 @@ nova nem componente de overlay customizado.
 
 import reflex as rx
 
-from prospect_agent.styles.brazil_geo import PATHS, VIEWBOX
+from sales_support_agent.styles.brazil_geo import PATHS, VIEWBOX
 
 
 def brazil_map(cores_por_estado, contagem_por_estado, width: str = "100%", height: str = "420px") -> rx.Component:

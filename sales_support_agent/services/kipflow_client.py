@@ -105,7 +105,7 @@ _throttle = _Throttle(RATE_LIMIT_RPS, RATE_LIMIT_RPM)
 
 def api_key_configurada() -> bool:
     """Diz se há chave configurada (Integrações, God Mode), sem revelar o valor."""
-    from prospect_agent.services.settings import get_kipflow_api_key
+    from sales_support_agent.services.settings import get_kipflow_api_key
 
     return bool(get_kipflow_api_key())
 
@@ -148,7 +148,7 @@ async def _request(
     json_body: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Executa uma requisição com throttle, retry e erros traduzidos."""
-    from prospect_agent.services.settings import get_kipflow_api_key, get_kipflow_base_url
+    from sales_support_agent.services.settings import get_kipflow_api_key, get_kipflow_base_url
 
     chave = get_kipflow_api_key()
     if not chave:

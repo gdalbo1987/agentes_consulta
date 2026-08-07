@@ -31,7 +31,7 @@ from sqlmodel import Session, select
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from prospect_agent.models import Tenant, User  # noqa: E402
+from sales_support_agent.models import Tenant, User  # noqa: E402
 
 ORGANIZACAO = "Coester"
 
@@ -113,7 +113,7 @@ def main() -> None:
 
     # As duas funções abrem sua própria sessão (via rx.session) e são
     # idempotentes — mesma rotina que o /admin já executa no on_load.
-    from prospect_agent.services.settings import (
+    from sales_support_agent.services.settings import (
         ensure_agent_settings,
         ensure_integration_settings,
     )

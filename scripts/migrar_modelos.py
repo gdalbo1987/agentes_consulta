@@ -25,7 +25,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import reflex as rx  # noqa: E402  (precisa do .env carregado antes do import)
 
-from prospect_agent.models import AgentModelSetting, brt_now  # noqa: E402
+from sales_support_agent.models import AgentModelSetting, brt_now  # noqa: E402
 
 # modelo antigo -> modelo novo
 _DE_PARA = {

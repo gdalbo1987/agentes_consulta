@@ -61,7 +61,7 @@ def _send_html_email(to_email: str, subject: str, html: str, *, embed_logo: bool
     não podem falhar porque o e-mail não saiu. O erro vai para o log do servidor
     e o super admin confirma a configuração pelo botão de teste em `/admin`.
     """
-    from prospect_agent.services.graph_mailer import enviar_email
+    from sales_support_agent.services.graph_mailer import enviar_email
 
     try:
         enviar_email(

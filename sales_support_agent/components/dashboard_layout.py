@@ -1,7 +1,7 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.state import AppState
-from prospect_agent.styles.typography import BODY_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.state import AppState
+from sales_support_agent.styles.typography import BODY_FONT
 
 def sidebar_item(text: str, icon: str, href: str) -> rx.Component:
     # Compacto de propósito: são até 9 itens + logo + menu do usuário dentro de

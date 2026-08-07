@@ -1,8 +1,8 @@
 import reflex as rx
 from datetime import date
 
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import BODY_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import BODY_FONT
 
 # E-mail para dúvidas sobre a plataforma interna.
 CONTATO_EMAIL = "inovacao@coester.com.br"

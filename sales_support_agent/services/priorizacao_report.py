@@ -30,7 +30,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from prospect_agent.services.normalizers import formatar_cnpj
+from sales_support_agent.services.normalizers import formatar_cnpj
 
 # As fontes padrão do reportlab (Helvetica/Times, os "Adobe standard 14") só
 # suportam WinAnsiEncoding — cobre acentos do pt-BR, mas não símbolos fora do

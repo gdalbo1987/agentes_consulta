@@ -1,7 +1,7 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.state import AuthState
-from prospect_agent.styles.typography import HEADING_FONT, BODY_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.state import AuthState
+from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
 
 def auth_input(

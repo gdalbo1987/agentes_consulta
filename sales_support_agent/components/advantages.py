@@ -1,6 +1,6 @@
 import reflex as rx
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import HEADING_FONT, BODY_FONT
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
 def card_vantagem(icon_tag: str, title: str, description: str) -> rx.Component:
     return rx.box(

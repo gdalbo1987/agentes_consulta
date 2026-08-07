@@ -101,7 +101,7 @@ _throttle = _Throttle(RATE_LIMIT_RPS)
 
 def api_key_configurada() -> bool:
     """Diz se há ao menos uma conta configurada, sem revelar chave nenhuma."""
-    from prospect_agent.services.settings import slots_hunter_configurados
+    from sales_support_agent.services.settings import slots_hunter_configurados
 
     return bool(slots_hunter_configurados())
 
@@ -129,7 +129,7 @@ def inicio_do_ciclo(dia_renovacao: int, agora: Optional[datetime] = None) -> dat
     Função pura (recebe `agora`) para o comportamento em virada de mês ser
     testável sem mexer no relógio da máquina.
     """
-    from prospect_agent.models import brt_now
+    from sales_support_agent.models import brt_now
 
     agora = agora or brt_now()
     dia = max(1, min(int(dia_renovacao or 1), 31))
@@ -145,7 +145,7 @@ def inicio_do_ciclo(dia_renovacao: int, agora: Optional[datetime] = None) -> dat
 
 def proxima_renovacao(dia_renovacao: int, agora: Optional[datetime] = None) -> datetime:
     """Quando a cota zera de novo. Usado só para exibição."""
-    from prospect_agent.models import brt_now
+    from sales_support_agent.models import brt_now
 
     agora = agora or brt_now()
     inicio = inicio_do_ciclo(dia_renovacao, agora)
@@ -168,8 +168,8 @@ def creditos_usados_por_conta(tenant_id: int) -> Dict[int, int]:
     """
     import reflex as rx
 
-    from prospect_agent.models import HunterUsage
-    from prospect_agent.services.settings import get_hunter_dia_renovacao
+    from sales_support_agent.models import HunterUsage
+    from sales_support_agent.services.settings import get_hunter_dia_renovacao
 
     inicio = inicio_do_ciclo(get_hunter_dia_renovacao())
     with rx.session() as session:
@@ -198,7 +198,7 @@ def creditos_restantes_por_conta(tenant_id: int) -> Dict[int, int]:
     Uma conta removida some daqui mesmo tendo consumo no ciclo: ela não pode
     mais receber busca, então o que sobrava nela não é orçamento.
     """
-    from prospect_agent.services.settings import (
+    from sales_support_agent.services.settings import (
         get_hunter_creditos_mensais,
         slots_hunter_configurados,
     )
@@ -230,7 +230,7 @@ def registrar_uso(
     """
     import reflex as rx
 
-    from prospect_agent.models import HunterUsage
+    from sales_support_agent.models import HunterUsage
 
     with rx.session() as session:
         session.add(HunterUsage(
@@ -288,7 +288,7 @@ def normalizar_dominio(valor: str) -> str:
     âncora, tolerar um e-mail gravado por engano no campo de site, e exigir que
     sobre algo com ponto.
     """
-    from prospect_agent.services.normalizers import normalizar_dominio as _canonico
+    from sales_support_agent.services.normalizers import normalizar_dominio as _canonico
 
     base = _canonico(valor) or ""
     base = base.split("?")[0].split("#")[0].split("@")[-1]
@@ -476,7 +476,7 @@ class Balanceador:
         self._chaves_invalidas: set = set()  # subconjunto de _fora, para o aviso final
         # {slot: chave}. Lido uma vez: trocar a configuração no meio de uma
         # execução em background não deve mudar as contas usadas por ela.
-        from prospect_agent.services.settings import get_hunter_accounts
+        from sales_support_agent.services.settings import get_hunter_accounts
 
         self._chaves = dict(get_hunter_accounts())
 

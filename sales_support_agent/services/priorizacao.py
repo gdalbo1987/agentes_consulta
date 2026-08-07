@@ -28,11 +28,11 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import reflex as rx
 
-from prospect_agent.models import CompanyContact, ProspectCompany, brt_now
-from prospect_agent.services import priorizacao_agent as pa
-from prospect_agent.services import approach_agent as aa
-from prospect_agent.services.enrichment_rules import STATUS_CONSIDERADOS_ENRIQUECIDOS
-from prospect_agent.services.priorizacao_rules import (
+from sales_support_agent.models import CompanyContact, ProspectCompany, brt_now
+from sales_support_agent.services import priorizacao_agent as pa
+from sales_support_agent.services import approach_agent as aa
+from sales_support_agent.services.enrichment_rules import STATUS_CONSIDERADOS_ENRIQUECIDOS
+from sales_support_agent.services.priorizacao_rules import (
     calcular_score_final,
     definir_classe_prioridade,
     validar_criterios,
@@ -89,7 +89,7 @@ async def stream_priorizacao(
     `company_ids=None` processa todos os elegíveis do search_run; uma lista
     processa só os informados (execução individual usa uma lista de 1 item).
     """
-    from prospect_agent.services.enrichment import noticias_por_empresa
+    from sales_support_agent.services.enrichment import noticias_por_empresa
 
     avisos: List[str] = []
 

@@ -159,7 +159,7 @@ class AppState(rx.State):
         A montagem/envio fica em `services/emails.py` (mesmo layout do e-mail de
         convite: logo na faixa em degradê + botão em degradê).
         """
-        from prospect_agent.services.emails import send_password_reset_email as _send
+        from sales_support_agent.services.emails import send_password_reset_email as _send
         _send(to_email, user_name, reset_link)
 
 class AuthState(AppState):
@@ -366,7 +366,7 @@ class ProfileState(AppState):
             return toast_error("Cole o link de uma imagem primeiro.")
 
         with rx.session() as session:
-            from prospect_agent.models import User
+            from sales_support_agent.models import User
             user = session.query(User).filter(User.email == self.user_email).first()
             if user:
                 user.avatar_url = self.new_avatar_url
@@ -382,7 +382,7 @@ class ProfileState(AppState):
             return toast_error("Preencha a senha atual e a nova senha.")
 
         with rx.session() as session:
-            from prospect_agent.models import User
+            from sales_support_agent.models import User
             user = session.query(User).filter(User.email == self.user_email).first()
 
             # Sem hash gravado o usuário ainda não aceitou o convite: não há
@@ -456,7 +456,7 @@ def modelo_do_agente(agent_name: str) -> str:
     Ler no momento da gravação (e não no cálculo do custo) é o que faz o
     histórico de gasto ficar imune a uma troca de modelo posterior em `/admin`.
     """
-    from prospect_agent.services.settings import get_agent_config
+    from sales_support_agent.services.settings import get_agent_config
 
     chave = AGENTE_PARA_CHAVE_DE_CONFIG.get(agent_name)
     return get_agent_config(chave)[0] if chave else ""
@@ -510,7 +510,7 @@ class ProductState(AppState):
             return rx.redirect("/login")
 
         with rx.session() as session:
-            from prospect_agent.models import Product
+            from sales_support_agent.models import Product
 
             rows = (
                 session.query(Product)
@@ -562,7 +562,7 @@ class ProductState(AppState):
 
         was_edit = bool(self.editing_id)
         with rx.session() as session:
-            from prospect_agent.models import Product
+            from sales_support_agent.models import Product
 
             if self.editing_id:
                 # Atualização (com checagem de posse pelo tenant)
@@ -591,7 +591,7 @@ class ProductState(AppState):
         """Exclui um produto do tenant."""
         removed = False
         with rx.session() as session:
-            from prospect_agent.models import Product
+            from sales_support_agent.models import Product
 
             prod = session.get(Product, product_id)
             if prod and prod.tenant_id == self.tenant_id:
@@ -621,7 +621,7 @@ class ProductState(AppState):
         self.form_description = ""  # limpa o campo para receber o texto em streaming
         yield  # mostra o estado de carregando com o campo já vazio
 
-        from prospect_agent.services.product_agent import stream_product_text
+        from sales_support_agent.services.product_agent import stream_product_text
 
         usage = {"input": 0, "output": 0}
         had_error = False
@@ -648,7 +648,7 @@ class ProductState(AppState):
         # Registra o consumo de tokens (entrada e saída contados separadamente).
         if not had_error and (usage.get("input") or usage.get("output")):
             with rx.session() as session:
-                from prospect_agent.models import TokenUsage
+                from sales_support_agent.models import TokenUsage
                 session.add(
                     TokenUsage(
                         tenant_id=self.tenant_id,
@@ -753,7 +753,7 @@ class SearchState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import Product, ProspectCompany, SearchConfig, SearchRun
+        from sales_support_agent.models import Product, ProspectCompany, SearchConfig, SearchRun
 
         with rx.session() as session:
             self.search_limit = limite_consultas(self.is_superadmin)
@@ -880,9 +880,9 @@ class SearchState(AppState):
             self.progress_message = "Iniciando pesquisa..."
             self.has_result = False
 
-        from prospect_agent.models import SearchConfig, SearchRun, TokenUsage
-        from prospect_agent.services.prospect_agent import stream_prospect_search, ProdutoInput
-        from prospect_agent.services.search_scope import montar_escopo
+        from sales_support_agent.models import SearchConfig, SearchRun, TokenUsage
+        from sales_support_agent.services.prospect_agent import stream_prospect_search, ProdutoInput
+        from sales_support_agent.services.search_scope import montar_escopo
 
         with rx.session() as session:
             # Sobrescreve a configuração (regra de negócio: sem histórico de config).
@@ -1121,11 +1121,11 @@ def _montar_company_detail(session, c) -> "CompanyDetailUI":
     também por PriorizacaoState.open_lead_detail (mesmo lead, mesmos dados de
     enriquecimento — só a seção de priorização/approach muda por cima).
     """
-    from prospect_agent.models import CompanyContact
-    from prospect_agent.services.enrichment import noticias_por_empresa
-    from prospect_agent.services.enrichment_report import status_em_pt
-    from prospect_agent.services.enrichment_rules import formatar_telefone
-    from prospect_agent.services.normalizers import formatar_cnpj
+    from sales_support_agent.models import CompanyContact
+    from sales_support_agent.services.enrichment import noticias_por_empresa
+    from sales_support_agent.services.enrichment_report import status_em_pt
+    from sales_support_agent.services.enrichment_rules import formatar_telefone
+    from sales_support_agent.services.normalizers import formatar_cnpj
 
     contatos = (
         session.query(CompanyContact)
@@ -1253,15 +1253,15 @@ class EnrichmentState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import (
+        from sales_support_agent.models import (
             CompanyContact,
             EnrichmentRun,
             ProspectCompany,
             SearchRun,
         )
-        from prospect_agent.services.enrichment import ensure_companies_materialized
-        from prospect_agent.services.enrichment_rules import formatar_telefone
-        from prospect_agent.services.normalizers import formatar_cnpj
+        from sales_support_agent.services.enrichment import ensure_companies_materialized
+        from sales_support_agent.services.enrichment_rules import formatar_telefone
+        from sales_support_agent.services.normalizers import formatar_cnpj
 
         with rx.session() as session:
             # Limite de contatos por empresa: vale inclusive para o super admin,
@@ -1429,8 +1429,8 @@ class EnrichmentState(AppState):
             self.progress_total = total_inicial
             self.has_result = False
 
-        from prospect_agent.models import ActivityLog, EnrichmentRun
-        from prospect_agent.services.enrichment import stream_enrichment
+        from sales_support_agent.models import ActivityLog, EnrichmentRun
+        from sales_support_agent.services.enrichment import stream_enrichment
 
         with rx.session() as session:
             run = EnrichmentRun(
@@ -1533,7 +1533,7 @@ class EnrichmentState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import ProspectCompany
+        from sales_support_agent.models import ProspectCompany
 
         with rx.session() as session:
             c = session.get(ProspectCompany, company_id)
@@ -1555,9 +1555,9 @@ class EnrichmentState(AppState):
         if not self.search_run_id:
             return toast_error("Nenhuma pesquisa concluída para exportar.")
 
-        from prospect_agent.models import CompanyContact, ProspectCompany
-        from prospect_agent.services.enrichment import noticias_por_empresa
-        from prospect_agent.services.enrichment_report import (
+        from sales_support_agent.models import CompanyContact, ProspectCompany
+        from sales_support_agent.services.enrichment import noticias_por_empresa
+        from sales_support_agent.services.enrichment_report import (
             montar_relatorio,
             nome_do_arquivo,
         )
@@ -1619,7 +1619,7 @@ class EnrichmentState(AppState):
         com o usuário: só as zeradas (`enrichment_percentage == 0`) — leads
         parciais permanecem, pois já têm algum dado aproveitável.
         """
-        from prospect_agent.models import CompanyContact, ProspectCompany
+        from sales_support_agent.models import CompanyContact, ProspectCompany
 
         with rx.session() as session:
             zeradas = (
@@ -1765,9 +1765,9 @@ class PriorizacaoState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import PriorizacaoRun, ProspectCompany, SearchRun
-        from prospect_agent.services.enrichment_rules import STATUS_CONSIDERADOS_ENRIQUECIDOS
-        from prospect_agent.services.priorizacao_rules import cor_classe_prioridade
+        from sales_support_agent.models import PriorizacaoRun, ProspectCompany, SearchRun
+        from sales_support_agent.services.enrichment_rules import STATUS_CONSIDERADOS_ENRIQUECIDOS
+        from sales_support_agent.services.priorizacao_rules import cor_classe_prioridade
 
         with rx.session() as session:
             # Cota mensal por usuário, idêntica às demais etapas do funil.
@@ -1955,7 +1955,7 @@ class PriorizacaoState(AppState):
             self.progress_total = 1
             self.has_result = False
 
-        from prospect_agent.models import ProspectCompany
+        from sales_support_agent.models import ProspectCompany
 
         with rx.session() as session:
             c = session.get(ProspectCompany, company_id)
@@ -1990,8 +1990,8 @@ class PriorizacaoState(AppState):
         """Corpo comum das duas execuções (lote/individual): cria o
         PriorizacaoRun, consome stream_priorizacao e persiste progresso/
         resultado. Não é um event handler — é chamado de dentro de um."""
-        from prospect_agent.models import ActivityLog, PriorizacaoRun, TokenUsage
-        from prospect_agent.services.priorizacao import stream_priorizacao
+        from sales_support_agent.models import ActivityLog, PriorizacaoRun, TokenUsage
+        from sales_support_agent.services.priorizacao import stream_priorizacao
 
         with rx.session() as session:
             run = PriorizacaoRun(
@@ -2089,8 +2089,8 @@ class PriorizacaoState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import ProspectCompany
-        from prospect_agent.services.priorizacao_rules import PESOS_CRITERIOS
+        from sales_support_agent.models import ProspectCompany
+        from sales_support_agent.services.priorizacao_rules import PESOS_CRITERIOS
 
         with rx.session() as session:
             c = session.get(ProspectCompany, company_id)
@@ -2147,8 +2147,8 @@ class PriorizacaoState(AppState):
         if not self.search_run_id:
             return toast_error("Nenhuma pesquisa concluída para exportar.")
 
-        from prospect_agent.models import ProspectCompany
-        from prospect_agent.services.priorizacao_report import montar_relatorio, nome_do_arquivo
+        from sales_support_agent.models import ProspectCompany
+        from sales_support_agent.services.priorizacao_report import montar_relatorio, nome_do_arquivo
 
         with rx.session() as session:
             leads = (
@@ -2269,7 +2269,7 @@ class LeadsState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.services import dashboard_insights as di
+        from sales_support_agent.services import dashboard_insights as di
 
         self.produto_options = ["Todos"] + di.produtos_pesquisados(self.tenant_id)
         if self.produto_filter not in self.produto_options:
@@ -2296,7 +2296,7 @@ class LeadsState(AppState):
         """Recarrega a lista respeitando `produto_filter` ("Todos" -> sem
         filtro). Extraído de `load_leads` para poder ser chamado sozinho
         quando o filtro muda, sem reconsultar `produto_options`."""
-        from prospect_agent.services import dashboard_insights as di
+        from sales_support_agent.services import dashboard_insights as di
 
         produto = None if self.produto_filter == "Todos" else self.produto_filter
         coletor = (
@@ -2334,7 +2334,7 @@ class LeadsState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import ProspectCompany
+        from sales_support_agent.models import ProspectCompany
 
         with rx.session() as session:
             c = session.get(ProspectCompany, lead_id)
@@ -2350,7 +2350,7 @@ class LeadsState(AppState):
 
     def confirm_delete_lead(self):
         """Exclui um lead individual (e seus contatos) após confirmação."""
-        from prospect_agent.models import CompanyContact, ProspectCompany
+        from sales_support_agent.models import CompanyContact, ProspectCompany
 
         with rx.session() as session:
             c = session.get(ProspectCompany, self.lead_to_delete)
@@ -2377,8 +2377,8 @@ class LeadsState(AppState):
         12 critérios dependem dos contatos: "tem >=1 contato" e "tem >=1
         e-mail de contato"; sem recalcular, o percentual persistido mentiria
         sobre dados que acabaram de ser apagados)."""
-        from prospect_agent.models import CompanyContact, ProspectCompany
-        from prospect_agent.services.enrichment_rules import calcular_percentual, definir_status
+        from sales_support_agent.models import CompanyContact, ProspectCompany
+        from sales_support_agent.services.enrichment_rules import calcular_percentual, definir_status
 
         with rx.session() as session:
             empresas = (
@@ -2494,7 +2494,7 @@ class DashboardState(AppState):
         self._carregar_top_leads()
 
     def open_lead_detail(self, lead_id: int):
-        from prospect_agent.models import ProspectCompany
+        from sales_support_agent.models import ProspectCompany
 
         with rx.session() as session:
             c = session.get(ProspectCompany, lead_id)
@@ -2510,10 +2510,10 @@ class DashboardState(AppState):
         if not self.is_authenticated:
             return
 
-        from prospect_agent.services import dashboard_insights as di
-        from prospect_agent.services.enrichment_rules import formatar_telefone  # noqa: F401 (reservado p/ uso futuro no detalhe)
-        from prospect_agent.services.enrichment_report import status_em_pt
-        from prospect_agent.services.priorizacao_rules import cor_classe_prioridade
+        from sales_support_agent.services import dashboard_insights as di
+        from sales_support_agent.services.enrichment_rules import formatar_telefone  # noqa: F401 (reservado p/ uso futuro no detalhe)
+        from sales_support_agent.services.enrichment_report import status_em_pt
+        from sales_support_agent.services.priorizacao_rules import cor_classe_prioridade
 
         kpis = di.carregar_kpis(self.tenant_id)
         self.kpi_leads_encontrados = kpis["leads_encontrados"]
@@ -2546,9 +2546,9 @@ class DashboardState(AppState):
         filtro). Extraído de `load_dashboard_data` para poder ser chamado
         sozinho quando um dos dois filtros muda, sem refazer KPIs/gráficos/
         mapa."""
-        from prospect_agent.services import dashboard_insights as di
-        from prospect_agent.services.enrichment_report import status_em_pt
-        from prospect_agent.services.priorizacao_rules import cor_classe_prioridade
+        from sales_support_agent.services import dashboard_insights as di
+        from sales_support_agent.services.enrichment_report import status_em_pt
+        from sales_support_agent.services.priorizacao_rules import cor_classe_prioridade
 
         limite = None if self.top_leads_limit == "todos" else int(self.top_leads_limit)
         produto = None if self.produto_filter == "Todos" else self.produto_filter
@@ -2605,7 +2605,7 @@ class InsightsState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        from prospect_agent.models import ChatMessage
+        from sales_support_agent.models import ChatMessage
 
         with rx.session() as session:
             linhas = (
@@ -2649,8 +2649,8 @@ class InsightsState(AppState):
             ]
         yield rx.scroll_to("chat-anchor", align_to_top=False)
 
-        from prospect_agent.models import TokenUsage
-        from prospect_agent.services.insights_agent import stream_resposta
+        from sales_support_agent.models import TokenUsage
+        from sales_support_agent.services.insights_agent import stream_resposta
 
         texto_atual = ""
         async for event in stream_resposta(tenant_id, user_email, pergunta):
@@ -2696,7 +2696,7 @@ class InsightsState(AppState):
 
     def confirm_limpar_conversa(self):
         """Apaga todo o histórico da conversa (usuário atual, neste tenant)."""
-        from prospect_agent.models import ChatMessage
+        from sales_support_agent.models import ChatMessage
 
         with rx.session() as session:
             session.query(ChatMessage).filter(
@@ -2837,14 +2837,14 @@ class AdminState(AppState):
         if not self.is_superadmin:
             return rx.redirect("/dashboard")
 
-        from prospect_agent.models import HunterUsage, KipflowUsage, TokenUsage
-        from prospect_agent.services import hunter_client
-        from prospect_agent.services.settings import (
+        from sales_support_agent.models import HunterUsage, KipflowUsage, TokenUsage
+        from sales_support_agent.services import hunter_client
+        from sales_support_agent.services.settings import (
             get_hunter_creditos_totais,
             get_hunter_dia_renovacao,
             slots_hunter_configurados,
         )
-        from prospect_agent.services.token_pricing import (
+        from sales_support_agent.services.token_pricing import (
             ensure_token_pricing,
             funcoes_de_custo,
             get_pricing,
@@ -3043,7 +3043,7 @@ class AdminState(AppState):
             session.commit()
             self.log_activity("USER_INVITE", f"Convidou o usuário {email}.", session)
 
-        from prospect_agent.services.emails import send_invite_email
+        from sales_support_agent.services.emails import send_invite_email
         send_invite_email(email, name, f"{base_url()}/redefinir-senha?token={token}")
 
         self.create_dialog_open = False
@@ -3096,7 +3096,7 @@ class AdminState(AppState):
         """
         if not self.is_superadmin:
             return
-        from prospect_agent.models import ChatMessage
+        from sales_support_agent.models import ChatMessage
 
         with rx.session() as session:
             u = session.get(User, user_id)
@@ -3126,7 +3126,7 @@ class AdminState(AppState):
         até a própria Hunter recusar — o oposto do controle que o botão sugere."""
         if not self.is_superadmin:
             return
-        from prospect_agent.models import KipflowUsage, TokenUsage
+        from sales_support_agent.models import KipflowUsage, TokenUsage
 
         with rx.session() as session:
             tokens = session.query(TokenUsage).delete()
@@ -3325,14 +3325,14 @@ class SettingsState(AppState):
         if not self.is_superadmin:
             return rx.redirect("/dashboard")
 
-        from prospect_agent.models import IntegrationSetting
-        from prospect_agent.services.settings import (
+        from sales_support_agent.models import IntegrationSetting
+        from sales_support_agent.services.settings import (
             AGENT_KEYS,
             ensure_agent_settings,
             ensure_integration_settings,
             get_agent_config,
         )
-        from prospect_agent.services import token_pricing
+        from sales_support_agent.services import token_pricing
 
         ensure_agent_settings()
         ensure_integration_settings()
@@ -3364,7 +3364,7 @@ class SettingsState(AppState):
         # mostre exatamente os modelos oferecidos hoje — uma linha remanescente
         # de modelo aposentado continua no banco, contando no custo histórico,
         # mas não vira campo editável.
-        from prospect_agent.services.settings import MODELOS_DISPONIVEIS
+        from sales_support_agent.services.settings import MODELOS_DISPONIVEIS
 
         token_pricing.ensure_token_pricing()
         precos = token_pricing.get_pricing()
@@ -3388,8 +3388,8 @@ class SettingsState(AppState):
         Nenhuma CHAVE passa por aqui — o State é serializado para o browser, e
         o que a tela precisa saber é só "configurado" e o consumo.
         """
-        from prospect_agent.services import hunter_client
-        from prospect_agent.services.settings import (
+        from sales_support_agent.services import hunter_client
+        from sales_support_agent.services.settings import (
             ensure_hunter_accounts,
             get_hunter_creditos_mensais,
             slots_hunter_configurados,
@@ -3422,7 +3422,7 @@ class SettingsState(AppState):
     def save_agent_config(self, agent_key: str):
         if not self.is_superadmin:
             return toast_error("Apenas super admin pode alterar configurações.")
-        from prospect_agent.services.settings import salvar_agent_config
+        from sales_support_agent.services.settings import salvar_agent_config
 
         model = getattr(self, f"{agent_key}_model")
         effort = getattr(self, f"{agent_key}_effort")
@@ -3441,7 +3441,7 @@ class SettingsState(AppState):
         se o campo tiver sido preenchido — em branco preserva o valor atual."""
         if not self.is_superadmin:
             return toast_error("Apenas super admin pode alterar configurações.")
-        from prospect_agent.services.settings import salvar_integration_settings
+        from sales_support_agent.services.settings import salvar_integration_settings
 
         campos = {
             "graph_sender_email": self.graph_sender_email.strip(),
@@ -3481,8 +3481,8 @@ class SettingsState(AppState):
             destino = self.user_email
             self.graph_testando = True
 
-        from prospect_agent.services.emails import montar_email_de_teste
-        from prospect_agent.services.graph_mailer import enviar_email, GraphMailerError
+        from sales_support_agent.services.emails import montar_email_de_teste
+        from sales_support_agent.services.graph_mailer import enviar_email, GraphMailerError
 
         assunto, html, logo = montar_email_de_teste()
         try:
@@ -3507,8 +3507,8 @@ class SettingsState(AppState):
         """
         if not self.is_superadmin:
             return toast_error("Apenas super admin pode alterar configurações.")
-        from prospect_agent.services import token_pricing
-        from prospect_agent.services.settings import MODELOS_DISPONIVEIS
+        from sales_support_agent.services import token_pricing
+        from sales_support_agent.services.settings import MODELOS_DISPONIVEIS
 
         valores = {}
         for modelo in MODELOS_DISPONIVEIS:
@@ -3545,7 +3545,7 @@ class SettingsState(AppState):
     def save_kipflow_settings(self):
         if not self.is_superadmin:
             return toast_error("Apenas super admin pode alterar configurações.")
-        from prospect_agent.services.settings import salvar_integration_settings
+        from sales_support_agent.services.settings import salvar_integration_settings
 
         campos = {"kipflow_base_url": self.kipflow_base_url.strip() or "https://api.kipflow.io"}
         if self.kipflow_api_key_input.strip():
@@ -3569,7 +3569,7 @@ class SettingsState(AppState):
         """
         if not self.is_superadmin:
             return toast_error("Apenas super admin pode alterar configurações.")
-        from prospect_agent.services.settings import (
+        from sales_support_agent.services.settings import (
             salvar_hunter_account, salvar_integration_settings,
         )
 
@@ -3626,7 +3626,7 @@ class SettingsState(AppState):
         """
         if not self.is_superadmin:
             return toast_error("Apenas super admin pode alterar configurações.")
-        from prospect_agent.services.settings import remover_hunter_account
+        from sales_support_agent.services.settings import remover_hunter_account
 
         remover_hunter_account(int(slot))
         with rx.session() as session:

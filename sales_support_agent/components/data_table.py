@@ -7,7 +7,7 @@ importam daqui para não haver dois estilos de tabela no produto.
 
 import reflex as rx
 
-from prospect_agent.styles import colors
+from sales_support_agent.styles import colors
 
 
 def table_shell(header_cells, body_rows) -> rx.Component:

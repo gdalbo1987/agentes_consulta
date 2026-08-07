@@ -71,7 +71,7 @@ def enviar_email(
     `inline_image_path` embute uma imagem referenciada no HTML por `cid:<id>` —
     é assim que o logo aparece no e-mail sem depender de uma URL pública.
     """
-    from prospect_agent.services.settings import get_graph_config
+    from sales_support_agent.services.settings import get_graph_config
 
     cfg = get_graph_config()
     faltando = [

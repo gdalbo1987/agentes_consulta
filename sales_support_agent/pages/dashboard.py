@@ -1,12 +1,12 @@
 import reflex as rx
 
-from prospect_agent.components.brazil_map import brazil_map
-from prospect_agent.components.dashboard_layout import dashboard_layout
-from prospect_agent.components.data_table import col, table_shell
-from prospect_agent.pages.admin_dashboard import admin_card
-from prospect_agent.state import AppState, DashboardState
-from prospect_agent.styles import colors
-from prospect_agent.styles.typography import BODY_FONT, HEADING_FONT
+from sales_support_agent.components.brazil_map import brazil_map
+from sales_support_agent.components.dashboard_layout import dashboard_layout
+from sales_support_agent.components.data_table import col, table_shell
+from sales_support_agent.pages.admin_dashboard import admin_card
+from sales_support_agent.state import AppState, DashboardState
+from sales_support_agent.styles import colors
+from sales_support_agent.styles.typography import BODY_FONT, HEADING_FONT
 
 
 def _donut_card(titulo: str, data, altura: int = 280) -> rx.Component:
