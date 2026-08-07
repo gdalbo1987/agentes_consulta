@@ -28,16 +28,16 @@ def tutorial() -> rx.Component:
         
         rx.box(
             rx.flex(
-                step_circle("1", "Insira os descritivos dos seus produtos", "package"),
+                step_circle("1", "Conecte a caixa de e-mails do comercial", "mail"),
                 rx.icon(tag="arrow-right", color=colors.TEXT_SEC, opacity="0.45", size=32, display=rx.breakpoints(initial="none", lg="block")),
-                
-                step_circle("2", "Defina seus segmento alvo", "target"),
+
+                step_circle("2", "Aponte as pastas e os horários", "folder-cog"),
                 rx.icon(tag="arrow-right", color=colors.TEXT_SEC, opacity="0.45", size=32, display=rx.breakpoints(initial="none", lg="block")),
-                
-                step_circle("3", "IA procura os clientes e enriquece os dados", "sparkles"),
+
+                step_circle("3", "A IA classifica, marca e resume", "sparkles"),
                 rx.icon(tag="arrow-right", color=colors.TEXT_SEC, opacity="0.45", size=32, display=rx.breakpoints(initial="none", lg="block")),
-                
-                step_circle("4", "Receba o ranking inteligente", "list-ordered"),
+
+                step_circle("4", "Consulte tudo em conversa", "messages-square"),
                 
                 justify_content="space-between",
                 align_items="center",

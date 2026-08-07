@@ -327,23 +327,49 @@ def _graph_card() -> rx.Component:
             SettingsState.set_graph_client_secret_input,
             SettingsState.graph_client_secret_configurado,
         ),
+        _config_label("Pasta de origem da varredura"),
+        rx.input(
+            value=SettingsState.graph_pasta_origem,
+            on_change=SettingsState.set_graph_pasta_origem,
+            placeholder="inbox",
+            width="100%",
+        ),
         rx.text(
-            "O registro de aplicativo precisa da permissão de APLICAÇÃO "
-            "\"Mail.Send\" com consentimento do administrador, e o remetente "
-            "precisa ser uma caixa real do locatário.",
+            "Deixe \"inbox\" para a Caixa de Entrada. O nome bem-conhecido "
+            "funciona em qualquer idioma do locatário, o que um nome exibido "
+            "não faz: numa caixa em português ela se chama Caixa de Entrada.",
             size="1", color=colors.TEXT_SEC,
         ),
-        rx.button(
-            rx.icon(tag="send", size=14),
-            "Enviar e-mail de teste",
-            on_click=SettingsState.testar_graph,
-            loading=SettingsState.graph_testando,
-            disabled=SettingsState.graph_testando,
-            variant="soft",
-            color_scheme="blue",
-            size="2",
-            cursor="pointer",
-            margin_top="0.5rem",
+        rx.text(
+            "O registro de aplicativo precisa de DUAS permissões de APLICAÇÃO, "
+            "com consentimento do administrador: \"Mail.Send\" para enviar "
+            "convites e \"Mail.ReadWrite\" para ler, marcar e mover e-mails. O "
+            "remetente precisa ser uma caixa real do locatário: conta pessoal "
+            "(hotmail.com, outlook.com) não funciona no fluxo de aplicação.",
+            size="1", color=colors.TEXT_SEC,
+        ),
+        rx.hstack(
+            rx.button(
+                rx.icon(tag="send", size=14),
+                "Enviar e-mail de teste",
+                on_click=SettingsState.testar_graph,
+                loading=SettingsState.graph_testando,
+                disabled=SettingsState.graph_testando,
+                variant="soft", color_scheme="blue", size="2", cursor="pointer",
+            ),
+            # Botão separado, e não um teste só: `Mail.Send` e `Mail.ReadWrite`
+            # falham de formas diferentes. Sem conferir a LEITURA aqui, o
+            # primeiro sinal de um consentimento faltando seria a execução das
+            # 08:00 falhando, num horário em que ninguém está olhando.
+            rx.button(
+                rx.icon(tag="folder-search", size=14),
+                "Testar leitura da caixa",
+                on_click=SettingsState.testar_leitura_graph,
+                loading=SettingsState.graph_testando_leitura,
+                disabled=SettingsState.graph_testando_leitura,
+                variant="soft", color_scheme="green", size="2", cursor="pointer",
+            ),
+            spacing="2", margin_top="0.5rem", wrap="wrap",
         ),
         on_save=SettingsState.save_graph_settings,
     )

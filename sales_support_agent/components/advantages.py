@@ -25,20 +25,22 @@ def card_vantagem(icon_tag: str, title: str, description: str) -> rx.Component:
     )
 
 def advantages() -> rx.Component:
+    # Continuam seis: o grid é de 1, 2 ou 3 colunas conforme a largura, e seis é
+    # a única contagem que preenche as três sem deixar buraco na última linha.
     cards_data = [
-        ("cpu", "IA para Priorização", "Define automaticamente quais leads possuem maior potencial."),
-        ("database", "Enriquecimento Inteligente", "Consulta informações empresariais automaticamente."),
-        ("bar-chart-3", "Score Comercial", "Calcula um score baseado em ICP, porte, faturamento e presença digital."),
-        ("lightbulb", "Insights da Empresa", "Resume informações importantes antes do primeiro contato."),
-        ("target", "Estratégia Comercial", "Sugere abordagem personalizada para cada empresa."),
-        ("clock", "Economia de Tempo", "Seu time atende primeiro quem realmente importa."),
+        ("mail-check", "Classificação automática", "Separa cada e-mail em pedido, proposta, revisão de pedido ou revisão de proposta."),
+        ("siren", "Detecção de urgência", "Marca o que pede entrega ou resposta dentro do prazo que você definir."),
+        ("folder-tree", "Arquivamento na pasta certa", "Move a mensagem para a pasta da classe dela, direto no Outlook."),
+        ("file-text", "Resumo pronto para ler", "Diz o que o cliente quer e qual o próximo passo, sem abrir o e-mail."),
+        ("sparkles", "Consulta em conversa", "Pergunte o que está urgente ou o que chegou de um cliente, em português."),
+        ("clock", "Economia de tempo", "Duas execuções por dia, sem ninguém precisar lembrar de rodar nada."),
     ]
     
     return rx.box(
         rx.center(
             rx.vstack(
-                rx.heading("Muito mais do que uma simples prospecção de clientes.", font_family=HEADING_FONT, font_weight="900", size="8", color=colors.TEXT_MAIN),
-                rx.text("Uma plataforma que utiliza agentes de IA para transformar dados em inteligência comercial.", font_family=BODY_FONT, color=colors.TEXT_SEC, size="4", text_align="center", max_width="600px"),
+                rx.heading("Muito mais do que uma caixa de entrada organizada.", font_family=HEADING_FONT, font_weight="900", size="8", color=colors.TEXT_MAIN),
+                rx.text("Três agentes de IA que leem, classificam e resumem os e-mails do comercial, para o time gastar o dia respondendo e não triando.", font_family=BODY_FONT, color=colors.TEXT_SEC, size="4", text_align="center", max_width="600px"),
                 spacing="4",
                 align_items="center",
                 margin_bottom="4rem"

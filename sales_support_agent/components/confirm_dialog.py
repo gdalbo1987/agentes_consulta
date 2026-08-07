@@ -2,7 +2,7 @@
 
 Nasceu dentro de `pages/admin_dashboard.py` ("Limpar contadores"/"Limpar
 histórico") e foi extraído para cá quando passou a ter mais chamadores
-(exclusão em lote no Enriquecimento, exclusão individual em Listas e Leads) —
+(limpeza de contadores, exclusão de histórico, remoção de conta) e
 mesmo motivo pelo qual `table_shell`/`col` foram extraídos para
 `components/data_table.py`.
 """

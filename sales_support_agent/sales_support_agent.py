@@ -47,7 +47,7 @@ app = rx.App(style=BASE_STYLE)
 # que roda em processo filho, levantar apenas um agendador.
 app.register_lifespan_task(iniciar_agendador)
 
-app.add_page(landing_page, route="/", title="Coester | Plataforma de Prospecção")
+app.add_page(landing_page, route="/", title="Coester | Agente de Suporte ao Comercial")
 app.add_page(auth_page, route="/login", title="Acessar | Coester")
 app.add_page(
     admin_dashboard,

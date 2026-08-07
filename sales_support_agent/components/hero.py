@@ -42,8 +42,8 @@ def hero() -> rx.Component:
         # 2. Conteúdo sobreposto (Texto e Botões)
         rx.vstack(
             rx.heading(
-                "Plataforma Coester de Prospecção", 
-                font_family=HEADING_FONT, 
+                "Agente de Suporte ao Comercial",
+                font_family=HEADING_FONT,
                 font_weight="900", 
                 size="9", 
                 color=colors.TEXT_MAIN, 
@@ -53,8 +53,8 @@ def hero() -> rx.Component:
                 line_height="1.1"
             ),
             rx.heading(
-                "Priorize seus leads com Inteligência Artificial.", 
-                font_family=HEADING_FONT, 
+                "Sua caixa comercial organizada por Inteligência Artificial.",
+                font_family=HEADING_FONT,
                 font_weight="900", 
                 size="8", 
                 color=colors.HIGHLIGHT, 
@@ -64,8 +64,8 @@ def hero() -> rx.Component:
                 line_height="1.1"
             ),
             rx.text(
-                "Ferramenta interna do Grupo Coester: pesquisa, enriquece dados empresariais, calcula o potencial de cada lead e recomenda quem a equipe comercial deve atender primeiro.", 
-                font_family=BODY_FONT, 
+                "Ferramenta interna do Grupo Coester: lê a caixa de e-mails do comercial, separa pedidos, propostas e revisões, marca o que é urgente, arquiva cada mensagem na pasta certa e resume tudo para a equipe atender primeiro o que não pode esperar.",
+                font_family=BODY_FONT,
                 font_weight="400", 
                 size="5", 
                 color=colors.TEXT_SEC, 

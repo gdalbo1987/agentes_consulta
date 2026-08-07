@@ -1446,6 +1446,10 @@ class SettingsState(AppState):
     graph_client_secret_input: str = ""
     graph_client_secret_configurado: bool = False
     graph_testando: bool = False
+    # `inbox` (nome bem-conhecido) ou o id de uma pasta específica. Fica aqui,
+    # e não na configuração operacional do dashboard, porque é nível de conexão.
+    graph_pasta_origem: str = "inbox"
+    graph_testando_leitura: bool = False
 
     # --- Preço do token OpenAI, por modelo ---
     # {modelo: valor digitado}. Texto (não float) porque é o que o input
@@ -1493,6 +1497,9 @@ class SettingsState(AppState):
     def set_graph_client_secret_input(self, value: str):
         self.graph_client_secret_input = value
 
+    def set_graph_pasta_origem(self, value: str):
+        self.graph_pasta_origem = value
+
     # Um par de setters para os 3 modelos: o modelo vem como argumento, ligado
     # no `on_change` da UI (`lambda v: ...set_token_input_price(modelo, v)`).
     # Assim incluir um 4º modelo em MODELOS_DISPONIVEIS não exige mexer aqui.
@@ -1537,6 +1544,7 @@ class SettingsState(AppState):
                 self.graph_tenant_id = linha.graph_tenant_id
                 self.graph_client_id = linha.graph_client_id
                 self.graph_client_secret_configurado = bool(linha.graph_client_secret_enc)
+                self.graph_pasta_origem = linha.graph_pasta_origem or "inbox"
 
         # Campos de segredo: sempre em branco no load (nunca o valor real).
         self.graph_client_secret_input = ""
@@ -1592,6 +1600,7 @@ class SettingsState(AppState):
             "graph_sender_email": self.graph_sender_email.strip(),
             "graph_tenant_id": self.graph_tenant_id.strip(),
             "graph_client_id": self.graph_client_id.strip(),
+            "graph_pasta_origem": self.graph_pasta_origem.strip() or "inbox",
         }
         if self.graph_client_secret_input.strip():
             campos["graph_client_secret"] = self.graph_client_secret_input.strip()
@@ -1640,6 +1649,39 @@ class SettingsState(AppState):
 
         async with self:
             self.graph_testando = False
+        yield resultado
+
+    @rx.event(background=True)
+    async def testar_leitura_graph(self):
+        """Confere que a credencial cobre LEITURA da caixa, e não só envio.
+
+        Botão separado do "enviar e-mail de teste" porque `Mail.Send` e
+        `Mail.ReadWrite` são permissões distintas no Entra ID e falham de formas
+        distintas. Um envio bem-sucedido não diz nada sobre a leitura, e sem
+        este teste o primeiro sinal de um consentimento faltando seria a
+        execução automática das 08:00 falhando, num horário em que ninguém está
+        olhando o painel.
+        """
+        async with self:
+            if not self.is_superadmin:
+                return
+            self.graph_testando_leitura = True
+
+        from sales_support_agent.services import graph_client
+        from sales_support_agent.services.graph_client import GraphClientError
+
+        try:
+            resposta = await graph_client.testar_leitura()
+            resultado = toast_success(
+                f"Leitura confirmada: {resposta['total_pastas']} pasta(s) na caixa."
+            )
+        except GraphClientError as e:
+            resultado = toast_error(e.mensagem)
+        except Exception as e:  # rede fora do ar, DNS
+            resultado = toast_error(f"Falha inesperada na leitura: {e}")
+
+        async with self:
+            self.graph_testando_leitura = False
         yield resultado
 
     def save_token_pricing(self):
