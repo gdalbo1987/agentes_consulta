@@ -8,3 +8,4 @@ __pycache__/
 .env
 reflex.log
 reflex.lock
+.pytest_cache/

@@ -35,3 +35,12 @@ cryptography>=42.0.0
 # Autenticação client-credentials na Microsoft Graph API (envio de e-mails
 # transacionais — ver services/graph_mailer.py). Substituiu o SMTP.
 msal>=1.28.0
+
+# --- Testes ---
+# `respx` mocka o httpx, que é o transporte do services/graph_client.py. Ele é
+# o que permite testar a leitura da caixa sem tocar em caixa nenhuma: ver a
+# trava em tests/conftest.py, que faz o teste FALHAR se alguém tentar falar com
+# graph.microsoft.com de verdade.
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+respx>=0.21.0
