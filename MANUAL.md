@@ -1,8 +1,8 @@
-# Manual da Plataforma Coester de Prospecção
+# Manual do Agente de Suporte ao Comercial
 
-Duas partes independentes. A **Parte 1** é para quem instala e mantém a
-plataforma no servidor. A **Parte 2** é para quem usa a plataforma no dia a dia
-e não precisa saber nada de técnico.
+Este documento tem duas partes independentes. A **Parte 1** é para quem instala
+e mantém a aplicação. A **Parte 2** é para quem usa o sistema no dia a dia e não
+precisa saber nada da Parte 1.
 
 ---
 
@@ -10,108 +10,108 @@ e não precisa saber nada de técnico.
 
 ## 1.1 O que é preciso ter antes
 
-| Item | Observação |
-|---|---|
-| Python 3.12 | versão em que o projeto foi desenvolvido e testado |
-| PostgreSQL | banco vazio e acessível pelo servidor |
-| Acesso à internet no servidor | a primeira execução baixa as dependências do frontend |
-| Chave da OpenAI | obrigatória: sem ela nenhum agente funciona |
-| Chave da KipFlow | enriquecimento cadastral e contatos decisores |
-| Chave da Hunter.io | e-mail dos contatos (até 8 contas, ver 1.7) |
-| Registro de app no Entra ID | envio de convites e redefinição de senha |
-
-As três últimas são opcionais para subir, mas cada uma desliga uma parte do
-produto se faltar. Sem a KipFlow o enriquecimento nem inicia. Sem a Hunter o
-enriquecimento roda e avisa que não buscou e-mails. Sem o Entra ID os convites
-não chegam por e-mail (o usuário é criado, mas ninguém recebe o link).
+- **Python 3.12**
+- **PostgreSQL** com um banco vazio criado (o padrão do projeto é
+  `sales_support_agent`)
+- **Chave de API da OpenAI**
+- **Um registro de aplicativo no Entra ID** com as permissões descritas abaixo
+- **Uma caixa de correio corporativa** para o agente monitorar
 
 ### Registro no Entra ID
 
-O envio de e-mail usa a Microsoft Graph API com autenticação de aplicação, não
-de usuário. No portal do Entra ID:
+O agente fala com a Microsoft Graph pelo fluxo de **aplicação** (client
+credentials), sem usuário. No portal do Entra ID:
 
-1. Registre um aplicativo e anote o **Directory (tenant) ID** e o
-   **Application (client) ID**.
-2. Em "Certificados e segredos", crie um **client secret** e copie o valor na
-   hora (ele não é exibido de novo).
-3. Em "Permissões de API", adicione a permissão de **aplicação** (não delegada)
-   `Mail.Send` e **conceda o consentimento do administrador**.
-4. Escolha uma caixa de correio real do locatário para ser o remetente.
+1. **Registros de aplicativo** e "Novo registro". Dê um nome e registre.
+2. Anote o **ID do aplicativo (cliente)** e o **ID do diretório (locatário)**.
+3. Em **Certificados e segredos**, crie um **novo segredo do cliente** e copie o
+   VALOR na hora: ele não é exibido de novo.
+4. Em **Permissões de API**, adicione **permissões de aplicativo** (não
+   delegadas) para o Microsoft Graph:
+   - **`Mail.Send`**, para enviar os convites e as redefinições de senha.
+   - **`Mail.ReadWrite`**, para ler a caixa, aplicar categorias e mover
+     mensagens. **`Mail.Read` sozinha não basta**: ela não permite marcar nem
+     mover.
+   - Opcionalmente **`MailboxSettings.ReadWrite`**, só para que as categorias
+     apareçam coloridas no Outlook. Sem ela tudo funciona, as categorias apenas
+     saem sem cor.
+5. Clique em **Conceder consentimento do administrador**. Sem esse passo o Graph
+   responde 403 e nada funciona.
 
-Sem o consentimento de administrador, ou com um remetente que não seja caixa
-real, a API responde 403 e nenhum e-mail sai.
+### Duas coisas que costumam dar errado aqui
+
+**A caixa precisa ser real e do locatário.** O fluxo de aplicação só enxerga
+caixas de dentro do próprio locatário. Uma conta pessoal (`hotmail.com`,
+`outlook.com`, `gmail.com`) responde `ErrorInvalidUser` e **nenhuma credencial
+resolve**. Se o teste de leitura falhar com essa mensagem, o problema é o
+endereço, não o segredo.
+
+**`Mail.ReadWrite` de aplicação dá acesso a TODAS as caixas do locatário.**
+Restrinja o registro à caixa comercial com uma **ApplicationAccessPolicy** do
+Exchange Online. É um comando único no Exchange Online PowerShell, e sem ele um
+segredo vazado lê o e-mail da empresa inteira:
+
+```powershell
+New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
+  -PolicyScopeGroupId <grupo-ou-caixa@dominio> `
+  -AccessRight RestrictAccess `
+  -Description "Agente de Suporte ao Comercial: so a caixa do comercial"
+```
 
 ## 1.2 Instalação
 
 ```bash
-git clone <url-do-repositorio>
-cd prospect_agent
-
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+.venv/Scripts/activate            # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ## 1.3 Configuração
 
-```bash
-cp .env.example .env
-```
+Copie `.env.example` para `.env` e preencha. As variáveis obrigatórias:
 
-Abra o `.env` e preencha. As quatro que impedem o app de subir se faltarem:
-
-```ini
-DATABASE_URL=postgresql://usuario:senha@host:5432/nome_do_banco
-APP_BASE_URL=https://prospeccao.coester.com.br
-SETTINGS_ENCRYPTION_KEY=<gerada no passo abaixo>
-OPENAI_API_KEY=sk-...
-```
-
-Gere a chave de criptografia com:
+| Variável | Para que serve |
+|---|---|
+| `DATABASE_URL` | Conexão com o PostgreSQL. É a **única** configuração que fica só no `.env`, pelo motivo óbvio: não dá para guardar no banco o endereço do banco. |
+| `SETTINGS_ENCRYPTION_KEY` | Chave Fernet que cifra o segredo do Graph guardado no banco. Gere com o comando abaixo. Trocá-la invalida todos os segredos já gravados. |
+| `OPENAI_API_KEY` | Chave da OpenAI. |
+| `APP_BASE_URL` | Endereço público da aplicação. É a partir dele que os links de convite e de redefinição de senha são montados. |
+| `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_NOME` / `SUPER_ADMIN_SENHA` | Identidade do primeiro super admin. Só usadas na primeira execução do `seed`. |
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-**Guarde essa chave.** Ela cifra os segredos das integrações dentro do banco.
-Trocá-la depois não quebra o app, mas torna ilegíveis os segredos já gravados:
-eles passam a se comportar como "não configurado" e precisam ser digitados de
-novo em `/admin`.
+As credenciais do Graph (`GRAPH_SENDER_EMAIL`, `GRAPH_TENANT_ID`,
+`GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`) podem entrar no `.env` para o `seed`
+já as gravar cifradas, ou serem preenchidas depois em `/admin`. Depois da
+primeira execução, o banco é a fonte da verdade e o `.env` deixa de ser
+consultado para elas.
 
-`APP_BASE_URL` precisa ser o endereço público real, sem barra no final. É a base
-dos links de convite e de redefinição de senha. Se ficar em `localhost`, o
-convite chega com um link que só funciona na máquina de quem o gerou.
-
-As chaves de KipFlow, Hunter e Graph podem ficar no `.env` ou ser preenchidas
-depois em `/admin`. O que estiver no `.env` é gravado no banco já cifrado na
-primeira execução do seed. `HUNTER_API_KEY` vira a **conta 1** da Hunter; as
-demais contas são cadastradas em `/admin`.
+O bloco `TESTER_GRAPH_*` é opcional e existe só para os testes funcionais.
+**Ele precisa apontar para uma caixa DIFERENTE da de produção**: a suíte se
+recusa a rodar se as duas forem iguais.
 
 ## 1.4 Banco de dados e primeiro acesso
 
-A ordem importa. `migrate` cria as tabelas em que o `seed` escreve, e
-`SETTINGS_ENCRYPTION_KEY` precisa existir antes do `seed`, que já cifra as
-chaves de API encontradas no `.env`.
-
 ```bash
 python -m reflex db migrate
-
-SUPER_ADMIN_EMAIL="fulano@coester.com.br" \
-SUPER_ADMIN_NOME="Fulano de Tal" \
-SUPER_ADMIN_SENHA="uma-senha-forte" \
-python scripts/seed.py
+SUPER_ADMIN_SENHA="uma-senha-forte" python scripts/seed.py
 ```
 
-O seed cria três coisas: a organização Coester, o primeiro super admin e as
-linhas de configuração de agentes e integrações.
+O `seed` cria a organização, o primeiro super admin, as linhas de configuração
+dos agentes e as quatro linhas de pasta (com nome sugerido e sem identificador
+ainda). Ele é idempotente: rodar de novo não duplica nada nem sobrescreve uma
+senha já trocada.
 
-`SUPER_ADMIN_SENHA` não tem valor padrão de propósito. Sem ela o script para e
-explica o que fazer. Só o hash bcrypt vai para o banco, a senha em texto puro
-não é gravada em lugar nenhum. Troque a senha no primeiro acesso, em "Meu
-Perfil", e remova a variável do ambiente depois.
+Rodar o `seed` de novo também é o caminho de **resgate** quando a organização
+fica sem super admin: a permissão é restaurada sem tocar na senha.
 
-O seed é idempotente: rodar de novo não duplica nada e não sobrescreve uma senha
-já trocada.
+Se estiver migrando da versão anterior da plataforma, rode também:
+
+```bash
+python scripts/migrar_agentes.py
+```
 
 ## 1.5 Subir a aplicação
 
@@ -119,63 +119,63 @@ já trocada.
 python -m reflex run --env prod --single-port
 ```
 
-`--single-port` serve o frontend e o backend na mesma porta (3000), que é o que
-simplifica o proxy reverso. Sem essa opção, o backend sobe separado na 8000.
-
-A primeira execução baixa e compila as dependências do frontend e demora vários
-minutos. As seguintes são rápidas.
-
-Aponte o proxy reverso (Nginx, IIS, Caddy) para a porta 3000 com HTTPS. O
-`APP_BASE_URL` deve bater exatamente com o endereço que o proxy publica.
-
 ## 1.6 Verificação pós-deploy
 
-Nesta ordem, porque cada passo depende do anterior:
+1. Abra `/` e confira que a landing carrega.
+2. Entre com o super admin. Você deve cair em `/admin`.
+3. Em `/admin`, preencha a seção de Integrações com as credenciais do Graph e
+   clique em **Salvar**.
+4. Clique em **"Enviar e-mail de teste"**. Ele confere a permissão `Mail.Send`.
+5. Clique em **"Testar leitura da caixa"**. Ele confere a `Mail.ReadWrite`, e
+   deve responder com a quantidade de pastas encontradas.
 
-1. Abra `/` e confirme que a landing carrega com vídeo e logo.
-2. Faça login em `/login` com o super admin criado no seed.
-3. Você deve cair em `/dashboard`. Abra `/admin` pelo menu lateral.
-4. Em `/admin`, preencha as integrações que ficaram de fora do `.env`.
-5. Ainda em `/admin`, clique em **"Enviar e-mail de teste"** no card do
-   Microsoft Graph. Se o e-mail não chegar, resolva isso antes de convidar
-   alguém: um convite que não chega deixa a pessoa sem acesso e sem aviso.
-6. Preencha o **preço dos tokens** por modelo e o **limite de créditos da
-   Hunter** com o dia de renovação correto (ver 1.7).
-7. Convide um usuário de teste e confirme que o link recebido define a senha.
+   Os dois botões existem porque são permissões diferentes e falham de formas
+   diferentes. Um envio bem-sucedido não diz nada sobre a leitura, e sem o
+   segundo teste o primeiro sinal de um consentimento faltando seria a execução
+   automática das 08:00 falhando, num horário em que ninguém está olhando.
+6. Vá em `/dashboard`, vincule as quatro pastas e rode o `--dry-run` da seção
+   1.8 antes de deixar o agente mexer na caixa.
 
 ## 1.7 Configurações que só existem em `/admin`
 
-Estas não estão no `.env` e precisam de atenção depois do deploy.
+- **Modelo e esforço de cada um dos três agentes.** Trocar aqui vale na próxima
+  execução, sem reiniciar o servidor.
+- **Preço do token por modelo**, em dólares por 1 milhão de tokens (o formato da
+  tabela da OpenAI). O banco guarda por token e a conversão é feita nas duas
+  pontas.
+- **Credenciais da Microsoft Graph** e a pasta de origem da varredura. Deixe
+  `inbox` para a Caixa de Entrada: o nome bem-conhecido funciona em qualquer
+  idioma do locatário, o que um nome exibido não faz.
+- **Convite e gestão de usuários.**
+- **Limpar contadores**, que apaga o histórico de consumo de tokens. Não toca em
+  e-mails, execuções nem logs.
 
-**Preço dos tokens da OpenAI.** Uma linha por modelo, em dólares por 1 milhão de
-tokens (o formato da tabela de preços publicada pela OpenAI). Enquanto
-estiverem zerados, os cards de custo mostram zero. O preço vale para o consumo
-registrado com aquele modelo, então trocar o modelo de um agente não reescreve
-o custo já apurado.
+## 1.8 A linha de comando
 
-**Contas e créditos da Hunter.** O card tem oito campos de chave, um por conta,
-mais dois números que valem para todas elas.
+`scripts/classificar.py` roda a mesma execução da aplicação, por fora dela.
 
-O Hunter vende créditos **por conta**, então cadastrar mais de uma multiplica a
-cota sem plano pago: com quatro contas gratuitas o orçamento do ciclo é 200
-créditos, não 50. A plataforma distribui as buscas entre as contas cadastradas,
-mandando cada uma para a que tem mais crédito sobrando, e se uma delas recusar
-(cota esgotada ou chave errada) a busca segue nas outras, com aviso no fim da
-rodada. O rótulo verde ao lado de cada conta mostra quanto ela já gastou no
-ciclo. O ícone de lixeira apaga a chave daquela conta, e é o único jeito de
-remover uma: deixar o campo em branco preserva a chave gravada, como em todos os
-campos de segredo do painel.
+```bash
+# Confere o que o agente FARIA, sem escrever nada (nem no Outlook, nem no banco)
+python scripts/classificar.py --manual --dry-run
 
-O **limite por ciclo** (50 no plano gratuito) é o teto de **cada** conta. O **dia
-da renovação** é o dia do mês em que as contas na Hunter foram criadas, não o dia
-1º, e define a janela em que os créditos são contados. Crie todas as contas no
-mesmo dia: o campo é um só, e um dia errado faz a plataforma liberar ou bloquear
-buscas na hora errada.
+# Execução manual de verdade
+python scripts/classificar.py --manual
 
-**Modelo e esforço de cada agente.** Quatro agentes configuráveis: produto,
-pesquisa, priorização (compartilhado com approach) e insights.
+# Só roda se algum horário configurado estiver vencido hoje
+python scripts/classificar.py --agendado
 
-## 1.8 Atualizações
+# Backfill controlado: amplia a janela só nesta execução
+python scripts/classificar.py --manual --desde 2026-07-01
+```
+
+O `--dry-run` é o jeito seguro de conferir a primeira execução numa caixa de
+produção. O `--agendado` é a saída de emergência: se o agendador interno der
+problema no ambiente, basta criar uma tarefa no Agendador de Tarefas do Windows
+apontando para ele a cada 15 minutos, com o caminho absoluto do
+`.venv\Scripts\python.exe`, marcando "executar estando o usuário conectado ou
+não".
+
+## 1.9 Atualizações
 
 ```bash
 git pull
@@ -184,20 +184,16 @@ python -m reflex db migrate
 python -m reflex run --env prod --single-port
 ```
 
-Se a atualização trouxer mudança de schema, o `migrate` aplica. Faça backup do
-banco antes de atualizar em produção.
-
-## 1.9 Problemas comuns
+## 1.10 Problemas comuns
 
 | Sintoma | Causa provável |
 |---|---|
-| `DATABASE_URL não configurada` ao rodar o seed | `.env` não foi lido ou a variável está vazia |
-| `SUPER_ADMIN_SENHA não configurada` | primeira execução do seed sem a variável (esperado) |
-| Convite não chega | Graph sem consentimento de administrador, ou remetente que não é caixa real |
-| Link do convite aponta para o endereço errado | `APP_BASE_URL` incorreto |
-| Integrações aparecem como "não configurado" depois de funcionar | `SETTINGS_ENCRYPTION_KEY` foi trocada |
-| `EBUSY` ao subir o servidor | sobrou uma instância anterior rodando, segurando os arquivos do frontend |
-| Enriquecimento interrompe avisando sobre a Receita | a consulta pública caiu. É proposital: sem ela cada empresa sairia muito mais cara na KipFlow |
+| "A caixa de e-mails configurada não existe neste locatário" | O endereço é de uma conta pessoal, ou não existe. O fluxo de aplicação só enxerga caixas do locatário. |
+| "O registro de aplicativo precisa da permissão Mail.ReadWrite" | Falta a permissão, ou falta o consentimento do administrador. |
+| "Credenciais da Microsoft Graph inválidas ou expiradas" | Segredo do cliente errado ou vencido. Segredos do Entra ID expiram. |
+| A classificação não começa e reclama de pastas | Alguma das quatro classes está sem pasta vinculada. Vincule em `/dashboard`. |
+| A execução automática não dispara | Confira se a configuração está ativa e se os horários estão em `HH:MM`. Um horário inválido é ignorado, e o outro continua funcionando. |
+| `EBUSY` ao subir o servidor | Ficou uma instância antiga rodando. Confirme pela porta, não pela lista de processos, e procure o processo filho do granian. |
 
 ---
 
@@ -205,261 +201,163 @@ banco antes de atualizar em produção.
 
 ## 2.1 Como entrar
 
-O acesso é só por convite. Não existe cadastro público nem login com Google.
+Você recebe um convite por e-mail com um link que vale **24 horas e só pode ser
+usado uma vez**. Clicando nele, você escolhe a sua própria senha. Ninguém, nem
+quem convidou, conhece essa senha.
 
-Um super admin cria o seu usuário informando nome, e-mail e classe. Você recebe
-um e-mail com um link válido por **24 horas** e **escolhe a sua própria senha**.
-Ninguém define senha por você, e nenhuma senha provisória circula por e-mail.
+Se o link expirar, peça um novo convite ou use "Esqueceu sua senha?" na tela de
+login.
 
-Se o link expirar, use "Esqueci minha senha" na tela de login, ou peça um novo
-convite.
+## 2.2 O que o sistema faz
 
-## 2.2 O caminho completo, em ordem
+Duas vezes por dia, nos horários que o time define, a plataforma lê a caixa de
+e-mails do comercial e, para cada mensagem nova:
 
-O funil tem cinco etapas e elas dependem umas das outras. Pular etapa não
-funciona: o enriquecimento só enxerga empresas que a pesquisa encontrou, e a
-priorização só enxerga empresas já enriquecidas.
+1. **Classifica** em uma de quatro categorias:
+   - **Pedido**: o cliente está comprando, mandando ordem de compra.
+   - **Proposta**: o cliente pede orçamento ou cotação de algo ainda não
+     comprado.
+   - **Revisão de pedido**: mexe num pedido que já existe (mudança de
+     quantidade, de prazo, cancelamento, cobrança de andamento).
+   - **Revisão de proposta**: mexe num orçamento já enviado (desconto, revisão
+     de escopo, questionamento de preço).
+2. **Marca como urgente** se o e-mail pede entrega ou resposta dentro da janela
+   configurada.
+3. **Aplica a categoria** no Outlook e **move** a mensagem para a pasta daquela
+   classe.
+4. **Resume** o e-mail: o que o cliente quer, os pontos principais e o próximo
+   passo.
 
-```
-Produtos  ->  Pesquisa  ->  Enriquecimento  ->  Priorização  ->  Insights
-```
+**E-mail que não se encaixa em nenhuma das quatro classes não é tocado.** Ele não
+recebe marcação, não é movido e continua na caixa de entrada. Newsletter,
+boleto, currículo e convite de reunião ficam onde estavam.
 
-### Passo 1: Produtos
+## 2.3 O dashboard
 
-Menu **Produtos**. Cadastre o que você vende, com nome e descrição.
+É a tela principal, em `/dashboard`.
 
-A descrição não é enfeite: é a partir dela que o agente de pesquisa entende que
-tipo de empresa precisa do seu produto. Descrição vaga ("equipamentos
-industriais") traz lead genérico. Descrição específica, dizendo qual problema o
-produto resolve e em que tipo de operação ele entra, traz lead melhor.
+### Os quatro indicadores do topo
 
-Há um assistente de IA que ajuda a escrever a descrição.
+- **Duração média das execuções** e **duração da última**. Enquanto não houver
+  nenhuma execução concluída, os dois mostram `-`.
+- **E-mails classificados**, no acumulado, e **na última execução**.
 
-Os produtos são compartilhados: todos os usuários veem e usam o mesmo catálogo,
-e não há limite de quantos cadastrar.
+### Configuração das execuções
 
-### Passo 2: Pesquisa
+- **Primeiro e segundo horário**: quando a classificação roda sozinha.
+- **Janela de urgência (horas)**: um e-mail é marcado como urgente quando pede
+  entrega ou resposta dentro desse prazo. Mudar esse número **revê a marcação
+  dos e-mails já classificados na hora**, sem reprocessar nada.
+- **Varrer as últimas (horas)**: quanto tempo para trás cada execução olha.
 
-Menu **Pesquisa**. Selecione um ou mais produtos e preencha:
+### Pastas do Outlook
 
-- **Região de interesse**: aceita do país ao município. "Brasil", "Sul", "Rio
-  Grande do Sul" ou "Caxias do Sul".
-- **Segmento estratégico**: o setor que você quer atingir.
+Uma linha por classe. Você digita o **nome** da pasta e clica em "Vincular"; o
+sistema descobre o identificador dela sozinho. O botão "Listar pastas da caixa"
+mostra o que existe no Outlook, para você não precisar adivinhar.
 
-Clique em **Executar pesquisa**. Antes de começar, a plataforma pergunta o que
-fazer com as empresas que a base já tem:
+Se houver duas pastas com o mesmo nome em lugares diferentes, o sistema não
+escolhe por você: ele mostra os dois caminhos e pede que você informe o caminho
+completo. Escolher sozinho arquivaria e-mail na pasta errada em silêncio.
 
-- **Apenas empresas novas**: a busca usa todo o esforço procurando empresas que
-  ainda não estão na base. As notícias das empresas antigas continuam sendo as
-  da última pesquisa que as encontrou.
-- **Incluir as empresas já encontradas**: além das inéditas, as empresas que a
-  base já tem nessa mesma linha de pesquisa voltam ao resultado com as notícias
-  buscadas de novo. Use quando for abordar uma lista já levantada e quiser o
-  gancho atualizado. A rodada demora mais, proporcionalmente a quantas forem.
+**Enquanto alguma classe estiver sem pasta, a classificação não roda.** Isso é
+proposital: começar e parar no meio deixaria parte dos e-mails arquivada e parte
+na caixa de entrada, que é o pior dos dois mundos.
 
-"Mesma linha de pesquisa" não exige repetir as palavras da vez anterior: a
-plataforma compara região e segmento por significado, então "RS" reencontra o
-que foi buscado como "Rio Grande do Sul".
+### Classificar agora
 
-Se você escolher incluir e nenhuma empresa da base pertencer a essa linha de
-pesquisa (você mudou de região ou de setor, por exemplo), a pesquisa roda
-normalmente só com empresas novas e um aviso no resultado diz isso, citando o
-recorte pedido. Um resultado sem nada reincluído nunca é silencioso.
+Roda a classificação na hora, sem esperar o horário. É exatamente a mesma
+execução que roda sozinha.
 
-Em qualquer das duas opções, a busca não gasta esforço reencontrando empresas
-que já estão na base. O agente devolve no mínimo 30 empresas com potencial de
-encaixe no seu perfil de cliente ideal, cada uma com uma nota de 0 a 100 e uma
-justificativa, mais as notícias recentes que servem de gancho de abordagem.
+### Urgências
 
-A pesquisa demora vários minutos. Acompanhe pela barra de progresso e não feche
-a página.
+Logo abaixo dos indicadores, a lista dos e-mails urgentes, do mais recente para
+o mais antigo, já com o resumo. Clique em qualquer um para ver o detalhe.
 
-Ao terminar aparecem o resumo, os avisos e o botão **Avançar para próxima
-etapa**.
+### Tabela de e-mails classificados
 
-Uma observação sobre contagem: quando uma pesquisa cobre dois produtos, os leads
-encontrados contam para os dois. Por isso a soma de leads por produto pode ser
-maior que o total da base. Não é erro.
+Filtre por intervalo de datas e pelo indicador de urgente. As datas são
+inclusivas nas duas pontas: filtrar "até 07/08" traz também o que chegou às 15h
+do dia 7.
 
-### Passo 3: Enriquecimento
+Clique numa linha para abrir o resumo completo: o que o cliente quer, os pontos
+principais, o próximo passo sugerido, o prazo mencionado, e um link para abrir a
+mensagem original no Outlook.
 
-Menu **Enriquecimento**. Clique em **Iniciar Enriquecimento**.
+## 2.4 Consulta IA
 
-A plataforma completa o cadastro de cada empresa e procura os decisores. Ela
-trabalha na ordem do mais barato para o mais caro: primeiro a Receita Federal,
-que é gratuita, e só depois as fontes pagas, para o que a Receita não tem.
+Em `/consulta` você conversa com um agente sobre os e-mails já classificados.
+Perguntas que ele responde bem:
 
-O que é coletado:
+- "Quais e-mails estão urgentes?"
+- "O que chegou esta semana?"
+- "Quantas propostas em aberto?"
+- "Teve algum e-mail da Metalúrgica Silva?"
+- "Aquele e-mail que falava de prazo de entrega, o que dizia?"
+- "Quando rodou a última classificação?"
 
-- razão social, CNPJ, cidade e estado, endereço, idade da empresa
-- porte, segmento, faixa de faturamento
-- situação cadastral, mais um **alerta em vermelho** para recuperação judicial,
-  falência e situações equivalentes
-- telefone, WhatsApp, site e LinkedIn
-- até **4 contatos decisores** por empresa, com nome e cargo
-- o **e-mail profissional** de cada contato, com um percentual de confiança
+Duas coisas que valem saber:
 
-Cada empresa recebe um percentual de 0 a 100, que é quanto dos 12 campos foi
-preenchido. Verde é completo, âmbar é parcial.
+**Ele só responde com o que está na base.** Se a informação não existir, ele diz
+que não encontrou, em vez de inventar. Isso não é só uma instrução: a plataforma
+verifica se a resposta veio de uma consulta de verdade e a substitui pela
+mensagem de "não encontrei" quando não veio.
 
-Sobre o percentual de confiança do e-mail: acima de 80 o endereço foi
-confirmado em fonte pública. Abaixo de 70 é um palpite baseado no padrão do
-domínio da empresa. Vale conferir antes de disparar campanha, porque e-mail
-errado queima a reputação do seu domínio.
+**Ele não escreve nada.** Não marca, não move, não envia e-mail, não altera
+configuração. É somente leitura. Isso protege contra um e-mail malicioso que
+tente dar ordens ao assistente: mesmo que o texto peça, não existe função que
+ele possa usar para obedecer. Se um e-mail tiver esse tipo de conteúdo, o
+assistente vai RELATAR isso para você, e não obedecer.
 
-O e-mail entra no cálculo do percentual. Uma empresa com tudo preenchido, mas
-sem nenhum e-mail, fica em 92% e continua na fila. Isso é intencional: quando os
-créditos renovam, ela ganha nova tentativa.
-
-Se aparecer o aviso de **limite de uso da Hunter**, a cota de créditos do
-período acabou em todas as contas cadastradas. O enriquecimento termina
-normalmente, só sem os e-mails restantes, e a mensagem informa a data em que a
-cota renova. Os contatos que ficaram de fora são tentados de novo depois, sem
-repetir os que já foram resolvidos. Se o aviso for de **chave inválida** numa
-conta, as buscas seguiram nas outras: peça ao super admin para revisar aquela
-chave em `/admin`.
-
-Ao final, **Baixar relatório (.xlsx)** gera uma planilha com três abas: uma
-linha por empresa, uma por contato e uma por notícia. É o formato para filtrar e
-importar no CRM.
-
-### Passo 4: Priorização
-
-Menu **Priorização**. Clique em **Iniciar priorização**.
-
-Cada lead é avaliado em 7 critérios com pesos diferentes:
-
-| Critério | Peso |
-|---|---|
-| Fit com o perfil de cliente ideal | 30% |
-| Potencial financeiro | 20% |
-| Facilidade de contato | 20% |
-| Segmento estratégico | 10% |
-| Sinais de investimento futuro | 10% |
-| Maturidade da empresa | 5% |
-| Região de localização | 5% |
-
-O resultado é uma nota de 0 a 100 e uma classe: **Alta**, **Média** ou **Baixa**.
-Clicando na linha você vê a justificativa de cada critério, e não só a nota.
-
-A opção **incluir approach** vem marcada. Com ela, cada lead também recebe de 2
-a 4 recomendações de primeiro contato: um gancho de abertura usando dados reais
-da empresa, o canal recomendado, uma dor provável e o timing sugerido.
-
-**Baixar relatório (.pdf)** gera um documento de apresentação, com a tabela
-resumo e uma página por lead. É o formato para levar a uma reunião. Para
-trabalhar em planilha, use o .xlsx do enriquecimento.
-
-### Passo 5: Lista de Leads
-
-Menu **Lista de Leads**. Todas as empresas já coletadas, de todas as pesquisas,
-com filtro por produto e por usuário que coletou.
-
-Clique em qualquer linha para abrir a ficha completa: identificação, canais de
-contato, decisores com e-mail e situação do enriquecimento.
-
-### Passo 6: Insights IA
-
-Menu **Insights IA**. Um chat que responde perguntas sobre a sua base. Ele lê os
-mesmos números do dashboard, então as respostas nunca divergem das telas.
-
-Exemplos do que ele responde:
-
-- "Quantos leads por produto? E qual produto rende os maiores scores?"
-- "Quais leads grandes de metalurgia no RS já têm contato?"
-- "Qual o faturamento da empresa X e por que ela ficou classe Alta?"
-- "Me passa o site, o LinkedIn e os e-mails dos meus melhores leads."
-- "Como abordar a empresa X?"
-- "O que ainda falta enriquecer?"
-
-Ele responde apenas com dados da base e diz quando não encontrou algo, em vez de
-inventar. Perguntas fora do assunto comercial são recusadas.
-
-A conversa fica salva entre sessões e é privada: cada usuário tem a sua. O botão
-**Limpar conversa** apaga o histórico.
-
-## 2.3 Dashboard
-
-Menu **Dashboard**. Visão geral da base: total de leads, quantos foram
-enriquecidos, notas médias, distribuição por segmento, porte, faturamento e
-situação cadastral, um mapa do Brasil por concentração de leads e a lista dos
-melhores leads. Clicar em um lead abre a mesma ficha de detalhe.
-
-## 2.4 Seus limites
-
-**20 consultas por mês, por usuário, em cada etapa.** Pesquisa, enriquecimento e
-priorização contam separadamente: são 20 de cada, não 20 no total. A cota é
-individual, o seu consumo não afeta o de outra pessoa, e ela renova no início do
-mês. Execuções que falharam não consomem cota.
-
-Quando você chega no limite, o botão é desabilitado e aparece um aviso
-explicando o motivo. A barra de progresso mostra quanto você já usou.
-
-**4 contatos por empresa** no enriquecimento. Esse limite vale para todo mundo,
-inclusive super admin, porque cada contato tem custo com o fornecedor.
+Perguntas fora do assunto (conhecimento geral, outros sistemas, pedidos de
+código) são recusadas. O botão "Limpar conversa" apaga o histórico do seu chat,
+que é individual.
 
 ## 2.5 Meu Perfil
 
-Menu **Meu Perfil**. Altere nome, foto e senha.
+Em `/profile` você atualiza a foto e troca a senha.
 
 ## 2.6 Para super admins
 
-Menu **Painel Admin**, visível apenas para super admins.
+Além de tudo acima, você tem `/admin`:
 
-**Usuários.** Convidar, editar, promover a super admin e revogar acesso. Ao
-revogar, o usuário e a conversa privada dele de Insights são apagados, mas os
-leads, pesquisas e enriquecimentos permanecem: são patrimônio da organização, e
-a autoria fica preservada no filtro por usuário da Lista de Leads.
+- **Consumo de tokens** da OpenAI, em dólares, com o preço de cada modelo e o
+  gráfico dos últimos 6 meses.
+- **Configuração dos três agentes**: qual modelo e qual esforço de raciocínio
+  cada um usa. Vale na próxima execução, sem reiniciar nada.
+- **Preço do token por modelo**, em dólares por 1 milhão de tokens.
+- **Integração com a Microsoft Graph**, com os dois botões de teste.
+- **Usuários**: convidar, editar, promover a super admin, remover.
+- **Feed de atividades**: o registro do que foi feito na plataforma.
+- **Limpar contadores**: apaga o histórico de consumo de tokens. Não toca em
+  e-mails, execuções nem usuários.
 
-Cuidado com uma armadilha: um super admin pode rebaixar a si mesmo para
-"Usuário". Sendo o único, isso tranca o painel para todos. A saída é técnica,
-rodar o seed de novo no servidor, então prefira sempre ter dois super admins.
-
-**Custos.** Três consumos medidos, cada um com acumulado e gráfico dos últimos 6
-meses:
-
-- **Tokens da OpenAI**, em dólares, multiplicando cada consumo pelo preço do
-  modelo que o gerou.
-- **KipFlow**, em reais, com o valor real cobrado pela API.
-- **Hunter**, em créditos, mostrando quanto do pacote do ciclo já foi usado, o
-  número de contas cadastradas e a data da próxima renovação. O total é a soma
-  das contas: quatro contas gratuitas dão 200 créditos por ciclo.
-
-**Integrações.** Chaves da KipFlow, as até oito contas da Hunter e as
-credenciais do Microsoft Graph, mais o preço dos tokens e o modelo de cada
-agente. As chaves aparecem apenas como "configurado" ou "não configurado", nunca
-em texto legível. Deixar o campo em branco ao salvar preserva o valor atual.
-
-**Limpar contadores.** Zera o histórico de tokens e de custo da KipFlow. Não
-apaga usuários, leads nem o histórico de atividades. Os créditos da Hunter
-ficam de fora de propósito: é a contagem deles que segura a cota, e zerá-la
-faria a plataforma buscar e-mails além do limite contratado.
-
-**Histórico de atividades.** Registro de quem fez o quê e quando.
+Ao convidar alguém, você informa nome, e-mail e classe. **Você não define
+senha**: a pessoa escolhe a dela pelo link.
 
 ## 2.7 Perguntas frequentes
 
-**Posso rodar o enriquecimento duas vezes?** Pode. Empresas já completas são
-puladas sem gasto, e as parciais reprocessam só o que falta. Contatos cujo
-e-mail já foi procurado não são procurados de novo, mesmo que não tenham sido
-encontrados.
+**Um e-mail foi para a pasta errada. O que faço?**
+Mova à mão no Outlook. A plataforma não o classifica de novo, mesmo que ele
+volte para a caixa de entrada: cada e-mail é processado uma vez só, e isso é o
+que evita gastar duas vezes com a mesma mensagem.
 
-**Por que uma empresa ficou em 92%?** Provavelmente falta o e-mail de contato,
-que é um dos 12 campos. Ela volta à fila quando os créditos da Hunter renovarem.
+**Mudei a janela de urgência. Preciso reclassificar?**
+Não. A marcação dos e-mails já classificados é revista na hora em que você
+salva.
 
-**Por que a soma de leads por produto é maior que o total?** Porque uma pesquisa
-que cobre dois produtos faz o mesmo lead contar nos dois.
+**Um e-mail importante ficou na caixa de entrada sem marcação.**
+Ele não se encaixou em nenhuma das quatro classes. Na dúvida entre classificar e
+deixar em paz, o agente deixa em paz: classificar errado esconde o e-mail numa
+pasta, deixar em paz apenas mantém tudo como estava.
 
-**O que significa o alerta vermelho na empresa?** Recuperação judicial, falência
-ou situação equivalente. Atenção: a Receita mantém como "ativa" uma empresa em
-recuperação judicial, então esse alerta é a única forma de perceber. Não é
-motivo automático de descarte, é informação para a decisão comercial.
+**A execução das 08:00 não rodou porque o computador estava desligado.**
+Ela roda quando o servidor subir, desde que ainda seja o mesmo dia. O sistema
+guarda qual horário já foi executado hoje.
 
-**Um contato veio do quadro societário e outro do LinkedIn. Qual a diferença?**
-O do quadro societário é o decisor de fato, mas normalmente sem canal direto:
-aborda-se pelo telefone da empresa perguntando por ele. O do LinkedIn tem canal
-direto, porém costuma ter menos senioridade.
+**Cliquei em "Classificar agora" e não aconteceu nada.**
+Provavelmente já havia uma execução em andamento. Só uma roda por vez, para que
+duas não briguem pelo mesmo e-mail.
 
-**Quem vê os meus leads?** Todos os usuários veem a base inteira da organização.
-O filtro por usuário na Lista de Leads serve para saber quem coletou cada um,
-não para esconder.
+**Meu chat da Consulta IA some quando outro usuário entra?**
+Não. Cada usuário tem o próprio histórico de conversa.
