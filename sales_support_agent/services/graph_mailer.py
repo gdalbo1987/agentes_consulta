@@ -19,11 +19,14 @@ import base64
 import os
 from typing import Optional
 
-import msal
 import requests
 
-_GRAPH = "https://graph.microsoft.com"
-_SCOPE = [f"{_GRAPH}/.default"]
+from sales_support_agent.services.graph_auth import (
+    GRAPH as _GRAPH,
+    GraphAuthError,
+    adquirir_token,
+    campos_faltando,
+)
 
 # O envio é síncrono e roda dentro de um event handler; um Graph pendurado não
 # pode segurar a requisição indefinidamente.
@@ -37,25 +40,6 @@ class GraphMailerError(Exception):
     convite ou a redefinição de senha. Já o teste manual do painel propaga, para
     o super admin ver a mensagem exata do erro.
     """
-
-
-def _adquirir_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    app = msal.ConfidentialClientApplication(
-        client_id,
-        authority=f"https://login.microsoftonline.com/{tenant_id}",
-        client_credential=client_secret,
-    )
-    # Tenta o cache em memória do MSAL antes de ir à rede (tokens valem ~1h).
-    resultado = app.acquire_token_silent(_SCOPE, account=None) or app.acquire_token_for_client(
-        scopes=_SCOPE
-    )
-    token = resultado.get("access_token")
-    if not token:
-        raise GraphMailerError(
-            "Falha ao autenticar na Microsoft Graph: "
-            f"{resultado.get('error_description') or resultado.get('error') or 'erro desconhecido'}"
-        )
-    return token
 
 
 def enviar_email(
@@ -74,23 +58,19 @@ def enviar_email(
     from sales_support_agent.services.settings import get_graph_config
 
     cfg = get_graph_config()
-    faltando = [
-        rotulo
-        for rotulo, valor in (
-            ("remetente", cfg["sender_email"]),
-            ("tenant ID", cfg["tenant_id"]),
-            ("client ID", cfg["client_id"]),
-            ("client secret", cfg["client_secret"]),
-        )
-        if not valor
-    ]
+    faltando = campos_faltando(cfg)
     if faltando:
         raise GraphMailerError(
             "Microsoft Graph não configurada. Faltam: " + ", ".join(faltando) +
             ". Preencha em /admin → Integrações → E-mail (Microsoft Graph)."
         )
 
-    token = _adquirir_token(cfg["tenant_id"], cfg["client_id"], cfg["client_secret"])
+    try:
+        token = adquirir_token(cfg["tenant_id"], cfg["client_id"], cfg["client_secret"])
+    except GraphAuthError as erro:
+        # Reembrulha para que quem chama continue precisando conhecer só uma
+        # exceção deste módulo, como antes da extração do `graph_auth`.
+        raise GraphMailerError(str(erro)) from erro
 
     mensagem = {
         "subject": subject,

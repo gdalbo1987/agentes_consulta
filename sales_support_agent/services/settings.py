@@ -141,21 +141,32 @@ def _linha_integracao(session) -> Optional[IntegrationSetting]:
 
 
 def get_graph_config() -> dict:
-    """Credenciais da Microsoft Graph para envio de e-mail.
+    """Credenciais da Microsoft Graph, para envio e para leitura da caixa.
 
     `tenant_id` aqui é o Directory (tenant) ID do Entra ID — nada a ver com o
     `tenant_id` da aplicação. O client secret sai decriptografado: use apenas
-    dentro de `services/graph_mailer.py`, NUNCA para popular um campo de State.
+    dentro de `services/graph_mailer.py` e `services/graph_client.py`, NUNCA
+    para popular um campo de State (State é serializado para o browser).
     """
     with rx.session() as session:
         linha = _linha_integracao(session)
         if not linha:
-            return {"sender_email": "", "tenant_id": "", "client_id": "", "client_secret": ""}
+            return {
+                "sender_email": "",
+                "tenant_id": "",
+                "client_id": "",
+                "client_secret": "",
+                "pasta_origem": "inbox",
+            }
         return {
             "sender_email": linha.graph_sender_email,
             "tenant_id": linha.graph_tenant_id,
             "client_id": linha.graph_client_id,
             "client_secret": crypto.decrypt(linha.graph_client_secret_enc),
+            # Nome bem-conhecido (`inbox`) ou id de pasta. `inbox` resolve a
+            # Caixa de Entrada em qualquer idioma do locatário, o que um
+            # displayName não faz.
+            "pasta_origem": (linha.graph_pasta_origem or "inbox"),
         }
 
 
