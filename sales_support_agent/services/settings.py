@@ -1,10 +1,5 @@
 """Fonte única de configuração dos agentes de IA (modelo + reasoning effort) e
-das integrações de conta (e-mail via Microsoft Graph, KipFlow e Hunter.io).
-
-A Hunter é a única com mais de uma credencial: as chaves ficam em
-`HunterAccount` (uma linha por conta, até `HUNTER_MAX_CONTAS`) e não em
-`IntegrationSetting`, que guarda só o que vale para todas elas — o teto de
-créditos por conta e o dia da renovação.
+da integração com a Microsoft Graph.
 
 Os valores ficam em `AgentModelSetting`/`IntegrationSetting`, editáveis pelo
 super admin em `/admin`. `_SEMENTE_AGENTES` e a leitura de `.env` dentro de
@@ -18,10 +13,10 @@ mudança do super admin valha na próxima chamada, sem restart (o custo de mais
 uma query simples é irrelevante perto do resto do trabalho de cada chamada de
 agente/integração).
 
-Segredos (client secret do Graph, chaves KipFlow e Hunter) são sempre gravados/lidos via
-`services/crypto.py` (Fernet) — nunca em texto puro no banco, e as funções aqui
-nunca devem ser usadas para popular um campo de State com o valor
-decriptografado (State é serializado para o browser).
+O client secret do Graph é sempre gravado/lido via `services/crypto.py` (Fernet)
+— nunca em texto puro no banco, e as funções aqui nunca devem ser usadas para
+popular um campo de State com o valor decriptografado (State é serializado para
+o browser).
 """
 import os
 from typing import Optional
@@ -30,7 +25,6 @@ import reflex as rx
 
 from sales_support_agent.models import (
     AgentModelSetting,
-    HunterAccount,
     IntegrationSetting,
     brt_now,
 )
@@ -39,25 +33,32 @@ from sales_support_agent.services import crypto
 # ---------------------------------------------------------------------------
 # Agentes de IA — modelo + reasoning effort
 # ---------------------------------------------------------------------------
-AGENT_KEYS = ("product", "prospect", "priorizacao", "insights")
+AGENT_KEYS = ("classificacao", "resumo", "consulta")
 
 # Modelos oferecidos no dropdown: restritos aos que aceitam reasoning effort,
-# para os 4 agentes terem a mesma UI (modelo + esforço) sem caso especial.
+# para os 3 agentes terem a mesma UI (modelo + esforço) sem caso especial.
 #
 # ATENÇÃO ao trocar esta tupla: `ensure_agent_settings()` nunca sobrescreve uma
-# linha existente, então as 4 linhas já gravadas continuam apontando para o
+# linha existente, então as linhas já gravadas continuam apontando para o
 # modelo ANTIGO — que some do dropdown e deixa o select do `/admin` sem valor
 # correspondente. Toda troca aqui exige um UPDATE nas linhas de
-# `AgentModelSetting` (ver `scripts/migrar_modelos.py`).
+# `AgentModelSetting`.
 MODELOS_DISPONIVEIS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano")
 EFFORTS_DISPONIVEIS = ("minimal", "low", "medium", "high")
 
-# Semente: nome do agente -> (env var do modelo, default, effort fixo hoje).
+# Semente: nome do agente -> (env var do modelo, default, effort inicial).
+#
+# Os esforços não são iguais de propósito. A classificação é a etapa de MAIOR
+# volume (uma chamada por e-mail, duas vezes por dia) e sua saída é um rótulo de
+# enum mais um inteiro e dois booleanos, então esforço alto compra pouco. O
+# resumo é compressão de um texto que já está inteiro no prompt, o caso em que
+# `minimal` basta. A consulta conversa com o usuário e herda a variável de
+# ambiente do antigo agente de insights, para que um `.env` já preenchido
+# continue valendo.
 _SEMENTE_AGENTES = {
-    "product": ("OPENAI_MODEL", "gpt-5.4-mini", "low"),
-    "prospect": ("OPENAI_SEARCH_MODEL", "gpt-5.4-mini", "high"),
-    "priorizacao": ("OPENAI_PRIORIZACAO_MODEL", "gpt-5.4-mini", "low"),
-    "insights": ("OPENAI_INSIGHTS_MODEL", "gpt-5.4-mini", "low"),
+    "classificacao": ("OPENAI_CLASSIFICACAO_MODEL", "gpt-5.4-mini", "low"),
+    "resumo": ("OPENAI_RESUMO_MODEL", "gpt-5.4-mini", "minimal"),
+    "consulta": ("OPENAI_INSIGHTS_MODEL", "gpt-5.4-mini", "low"),
 }
 
 
@@ -115,38 +116,12 @@ def salvar_agent_config(agent_key: str, model: str, effort: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integrações de conta — linha única (id=1)
+# Integração de conta — linha única (id=1)
 # ---------------------------------------------------------------------------
-# Teto de créditos/ciclo de CADA conta do Hunter na primeira execução: 50 é o
-# plano gratuito. É só a SEMENTE — a partir daí o valor vem do banco, editável
-# em `/admin`, porque migrar para um plano pago não pode exigir alterar código.
-HUNTER_CREDITOS_MENSAIS_PADRAO = 50
-
-# Quantas contas da Hunter a plataforma aceita balancear. O teto existe para a
-# UI do super admin ter um número fixo de campos e para o balanceador nunca
-# varrer uma lista aberta; subir esse número é seguro (nada além da UI depende
-# dele), descer exige checar se algum slot acima do novo teto está em uso.
-HUNTER_MAX_CONTAS = 8
-
-# Dia da renovação na primeira execução. 1 é só um valor neutro para não
-# inventar uma data de assinatura: o número certo é o dia em que a conta do
-# Hunter foi criada, e quem sabe isso é o super admin, em `/admin`.
-HUNTER_DIA_RENOVACAO_PADRAO = 1
-
-
-def _inteiro(valor: Optional[str], padrao: int) -> int:
-    try:
-        return max(0, int(str(valor).strip()))
-    except (TypeError, ValueError):
-        return padrao
 
 
 def ensure_integration_settings() -> None:
-    """Cria a linha única, semeada do `.env` atual, se ainda não existir.
-
-    Também garante a primeira conta da Hunter (ver `ensure_hunter_accounts`),
-    porque as duas coisas são a mesma configuração para quem instala.
-    """
+    """Cria a linha única, semeada do `.env` atual, se ainda não existir."""
     with rx.session() as session:
         linha = session.query(IntegrationSetting).first()
         if not linha:
@@ -156,89 +131,8 @@ def ensure_integration_settings() -> None:
                     graph_tenant_id=os.environ.get("GRAPH_TENANT_ID", ""),
                     graph_client_id=os.environ.get("GRAPH_CLIENT_ID", ""),
                     graph_client_secret_enc=crypto.encrypt(os.environ.get("GRAPH_CLIENT_SECRET", "")),
-                    kipflow_api_key_enc=crypto.encrypt(os.environ.get("KIPFLOW_API_KEY", "")),
-                    kipflow_base_url=os.environ.get("KIPFLOW_BASE_URL", "https://api.kipflow.io"),
-                    hunter_creditos_mensais=_inteiro(
-                        os.environ.get("HUNTER_CREDITOS_MENSAIS"), HUNTER_CREDITOS_MENSAIS_PADRAO
-                    ),
-                    hunter_dia_renovacao=_inteiro(
-                        os.environ.get("HUNTER_DIA_RENOVACAO"), HUNTER_DIA_RENOVACAO_PADRAO
-                    ),
                 )
             )
-            session.commit()
-    ensure_hunter_accounts()
-
-
-# ---------------------------------------------------------------------------
-# Contas da Hunter — até HUNTER_MAX_CONTAS, balanceadas na busca de e-mail
-# ---------------------------------------------------------------------------
-def ensure_hunter_accounts() -> None:
-    """Semeia a conta do slot 1 com `HUNTER_API_KEY` do `.env`, se não houver
-    NENHUMA conta cadastrada.
-
-    Só age na base sem conta alguma: uma vez que o super admin cadastrou as
-    contas em `/admin`, o `.env` deixa de ser consultado, como em todo o resto
-    deste módulo. Sem essa semente, quem instala com uma chave no `.env` subiria
-    o app com a busca de e-mails desligada e sem pista do motivo.
-    """
-    chave = os.environ.get("HUNTER_API_KEY", "").strip()
-    if not chave:
-        return
-    with rx.session() as session:
-        if session.query(HunterAccount).first():
-            return
-        session.add(HunterAccount(slot=1, api_key_enc=crypto.encrypt(chave)))
-        session.commit()
-
-
-def slots_hunter_configurados() -> list:
-    """Slots com chave gravada, em ordem. É o que a UI pode saber sobre as
-    contas: o valor da chave nunca sai daqui para o State."""
-    with rx.session() as session:
-        linhas = session.query(HunterAccount).order_by(HunterAccount.slot).all()
-        return [c.slot for c in linhas if c.api_key_enc and crypto.decrypt(c.api_key_enc)]
-
-
-def get_hunter_accounts() -> list:
-    """[(slot, chave decriptografada)] das contas configuradas, em ordem de slot.
-
-    Uso restrito a `services/hunter_client.py`. NUNCA para popular State.
-    """
-    with rx.session() as session:
-        linhas = session.query(HunterAccount).order_by(HunterAccount.slot).all()
-    contas = []
-    for c in linhas:
-        chave = crypto.decrypt(c.api_key_enc)
-        if chave:
-            contas.append((c.slot, chave))
-    return contas
-
-
-def salvar_hunter_account(slot: int, api_key: str) -> None:
-    """Grava (ou substitui) a chave de um slot. Chave em branco é ignorada —
-    quem quer remover a conta chama `remover_hunter_account`, para que um campo
-    esquecido em branco nunca apague uma credencial em uso."""
-    api_key = (api_key or "").strip()
-    if not api_key:
-        return
-    with rx.session() as session:
-        linha = session.query(HunterAccount).filter(HunterAccount.slot == slot).first()
-        if linha:
-            linha.api_key_enc = crypto.encrypt(api_key)
-            linha.updated_at = brt_now()
-        else:
-            session.add(HunterAccount(slot=slot, api_key_enc=crypto.encrypt(api_key)))
-        session.commit()
-
-
-def remover_hunter_account(slot: int) -> None:
-    """Apaga a credencial do slot. O consumo já registrado em `HunterUsage`
-    permanece: ele é histórico de custo, não configuração."""
-    with rx.session() as session:
-        linha = session.query(HunterAccount).filter(HunterAccount.slot == slot).first()
-        if linha:
-            session.delete(linha)
             session.commit()
 
 
@@ -265,59 +159,15 @@ def get_graph_config() -> dict:
         }
 
 
-def get_kipflow_api_key() -> str:
-    with rx.session() as session:
-        linha = _linha_integracao(session)
-        return crypto.decrypt(linha.kipflow_api_key_enc) if linha else ""
-
-
-def get_kipflow_base_url() -> str:
-    with rx.session() as session:
-        linha = _linha_integracao(session)
-        return (linha.kipflow_base_url if linha else "https://api.kipflow.io").rstrip("/")
-
-
-def get_hunter_creditos_mensais() -> int:
-    """Teto de créditos por ciclo DE UMA conta. O orçamento do ciclo inteiro é
-    este número vezes as contas configuradas — ver `get_hunter_creditos_totais`.
-    Usado pelo gate de cota em `services/hunter_client`."""
-    with rx.session() as session:
-        linha = _linha_integracao(session)
-        if not linha:
-            return HUNTER_CREDITOS_MENSAIS_PADRAO
-        return max(0, int(linha.hunter_creditos_mensais or 0))
-
-
-def get_hunter_creditos_totais() -> int:
-    """Orçamento do ciclo somando todas as contas configuradas.
-
-    É o número que o painel exibe e o que responde "quanto ainda dá para
-    buscar": acrescentar uma conta ao balanceador aumenta a cota da plataforma
-    sem trocar de plano.
-    """
-    return get_hunter_creditos_mensais() * len(slots_hunter_configurados())
-
-
-def get_hunter_dia_renovacao() -> int:
-    """Dia do mês em que o Hunter renova os créditos (aniversário da
-    assinatura). Define a janela contada em `hunter_client.inicio_do_ciclo`."""
-    with rx.session() as session:
-        linha = _linha_integracao(session)
-        if not linha:
-            return HUNTER_DIA_RENOVACAO_PADRAO
-        return max(1, min(int(linha.hunter_dia_renovacao or 1), 31))
-
-
 def salvar_integration_settings(**campos) -> None:
-    """Só sobrescreve os campos passados (chave ausente = não mexe). Campos
-    secretos (graph_client_secret, kipflow_api_key) são criptografados antes de
-    gravar; string vazia para um desses é ignorada (mantém o valor atual) —
-    quem decide "não digitou nada, não mexe" é o chamador (SettingsState), esta
-    função só grava o que recebeu.
+    """Só sobrescreve os campos passados (chave ausente = não mexe).
+
+    O campo secreto (`graph_client_secret`) é criptografado antes de gravar.
+    Quem decide "não digitou nada, não mexe" é o chamador (SettingsState): esta
+    função só grava o que recebeu, e receber string vazia aqui APAGA o segredo.
     """
     campos_secretos = {
         "graph_client_secret": "graph_client_secret_enc",
-        "kipflow_api_key": "kipflow_api_key_enc",
     }
     with rx.session() as session:
         linha = _linha_integracao(session)

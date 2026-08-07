@@ -1,5 +1,5 @@
 """Criptografia simétrica dos segredos guardados em `IntegrationSetting`
-(client secret da Microsoft Graph, chave da API KipFlow).
+(hoje um só: o client secret da Microsoft Graph).
 
 Usa Fernet (biblioteca `cryptography`) com uma chave mestra vinda de
 `SETTINGS_ENCRYPTION_KEY` no `.env` — se o banco vazar sozinho (backup, dump,

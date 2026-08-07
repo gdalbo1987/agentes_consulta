@@ -2,7 +2,7 @@ import reflex as rx
 
 from sales_support_agent.components.confirm_dialog import confirm_dialog
 from sales_support_agent.components.dashboard_layout import dashboard_layout
-from sales_support_agent.state import InsightsState
+from sales_support_agent.state import ConsultaState
 from sales_support_agent.styles import colors
 from sales_support_agent.styles.typography import BODY_FONT, HEADING_FONT
 
@@ -31,7 +31,7 @@ def _bubble(msg) -> rx.Component:
 def _sugestao(texto: str) -> rx.Component:
     return rx.button(
         texto,
-        on_click=[InsightsState.set_pergunta(texto), InsightsState.enviar_pergunta],
+        on_click=[ConsultaState.set_pergunta(texto), ConsultaState.enviar_pergunta],
         variant="soft",
         color_scheme="gray",
         size="2",
@@ -43,15 +43,15 @@ def _sugestao(texto: str) -> rx.Component:
 def _empty_state() -> rx.Component:
     return rx.vstack(
         rx.icon(tag="sparkles", size=32, color=colors.HIGHLIGHT),
-        rx.text("Pergunte sobre os leads já coletados", size="4", font_weight="700", color=colors.TEXT_MAIN, font_family=HEADING_FONT),
+        rx.text("Pergunte sobre os e-mails classificados", size="4", font_weight="700", color=colors.TEXT_MAIN, font_family=HEADING_FONT),
         rx.text(
-            "Segmentos, faturamento, porte, regiões, priorização... o agente responde com base nos seus dados reais.",
+            "Urgências, pedidos, propostas, revisões, o que chegou de cada cliente e em que data. O agente responde com base nos e-mails que a plataforma já classificou.",
             size="2", color=colors.TEXT_SEC, font_family=BODY_FONT, text_align="center",
         ),
         rx.hstack(
-            _sugestao("Me dê um panorama geral"),
-            _sugestao("Quais segmentos concentram mais leads?"),
-            _sugestao("Quais estados têm o melhor score?"),
+            _sugestao("Quais e-mails estão urgentes?"),
+            _sugestao("O que chegou esta semana?"),
+            _sugestao("Quantas propostas em aberto?"),
             spacing="2", wrap="wrap", justify_content="center",
         ),
         spacing="3", align_items="center", justify_content="center",
@@ -59,16 +59,16 @@ def _empty_state() -> rx.Component:
     )
 
 
-@rx.page(route="/insights-ia", on_load=InsightsState.load_insights)
-def insights_page() -> rx.Component:
+@rx.page(route="/consulta", on_load=ConsultaState.load_consulta)
+def consulta_page() -> rx.Component:
     return dashboard_layout(
         rx.vstack(
             rx.vstack(
                 rx.hstack(
                     rx.vstack(
-                        rx.heading("Insights IA", size="8", color=colors.TEXT_MAIN, font_family=HEADING_FONT),
+                        rx.heading("Consulta IA", size="8", color=colors.TEXT_MAIN, font_family=HEADING_FONT),
                         rx.text(
-                            "Converse com um agente sobre os leads já encontrados e enriquecidos.",
+                            "Converse com um agente sobre os e-mails já classificados e resumidos.",
                             color=colors.TEXT_SEC, font_family=BODY_FONT,
                         ),
                         spacing="1", align_items="start",
@@ -77,7 +77,7 @@ def insights_page() -> rx.Component:
                     rx.button(
                         rx.icon(tag="trash-2", size=16),
                         "Limpar conversa",
-                        on_click=InsightsState.set_clear_dialog_open(True),
+                        on_click=ConsultaState.set_clear_dialog_open(True),
                         variant="soft", color_scheme="red", cursor="pointer",
                     ),
                     width="100%", align_items="start", margin_bottom="1rem",
@@ -85,10 +85,10 @@ def insights_page() -> rx.Component:
 
                 rx.box(
                     rx.cond(
-                        InsightsState.sem_mensagens,
+                        ConsultaState.sem_mensagens,
                         _empty_state(),
                         rx.vstack(
-                            rx.foreach(InsightsState.messages, _bubble),
+                            rx.foreach(ConsultaState.messages, _bubble),
                             # Âncora invisível: alvo do rx.scroll_to disparado
                             # pelo state a cada nova mensagem/pedaço da
                             # resposta (rolagem automática do chat).
@@ -103,41 +103,41 @@ def insights_page() -> rx.Component:
                 ),
 
                 rx.cond(
-                    InsightsState.error != "",
-                    rx.callout(InsightsState.error, icon="triangle-alert", color_scheme="red", width="100%", margin_bottom="0.75rem"),
+                    ConsultaState.error != "",
+                    rx.callout(ConsultaState.error, icon="triangle-alert", color_scheme="red", width="100%", margin_bottom="0.75rem"),
                 ),
 
                 rx.form(
                     rx.hstack(
                         rx.input(
-                            placeholder="Pergunte sobre seus leads...",
-                            value=InsightsState.pergunta,
-                            on_change=InsightsState.set_pergunta,
+                            placeholder="Pergunte sobre os e-mails classificados...",
+                            value=ConsultaState.pergunta,
+                            on_change=ConsultaState.set_pergunta,
                             size="3", width="100%", variant="surface",
                             color="#111827", background_color="#e9e8e8",
-                            disabled=InsightsState.is_sending,
+                            disabled=ConsultaState.is_sending,
                         ),
                         rx.button(
                             rx.icon(tag="send", size=16),
                             type="submit",
-                            loading=InsightsState.is_sending,
-                            disabled=InsightsState.is_sending,
+                            loading=ConsultaState.is_sending,
+                            disabled=ConsultaState.is_sending,
                             background=colors.BTN_GRADIENT, color="white",
                             cursor="pointer", border_radius="8px", size="3",
                         ),
                         width="100%", spacing="2",
                     ),
-                    on_submit=InsightsState.enviar_pergunta,
+                    on_submit=ConsultaState.enviar_pergunta,
                     width="100%",
                 ),
 
                 confirm_dialog(
-                    open_var=InsightsState.clear_dialog_open,
-                    on_open_change=InsightsState.set_clear_dialog_open,
+                    open_var=ConsultaState.clear_dialog_open,
+                    on_open_change=ConsultaState.set_clear_dialog_open,
                     title="Limpar toda a conversa?",
                     body="Isso apaga todo o histórico deste chat (só o seu, neste workspace). A ação não pode ser desfeita.",
                     confirm_label="Limpar",
-                    on_confirm=InsightsState.confirm_limpar_conversa,
+                    on_confirm=ConsultaState.confirm_limpar_conversa,
                 ),
 
                 width="100%", max_width="900px", height="80vh", align_items="start",

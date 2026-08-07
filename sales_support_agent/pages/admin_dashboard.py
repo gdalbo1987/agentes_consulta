@@ -3,7 +3,7 @@ from sales_support_agent.components.confirm_dialog import confirm_dialog, dialog
 from sales_support_agent.components.dashboard_layout import dashboard_layout
 from sales_support_agent.components.data_table import col, table_shell
 from sales_support_agent.services.settings import EFFORTS_DISPONIVEIS, MODELOS_DISPONIVEIS
-from sales_support_agent.state import HUNTER_SLOTS, AdminState, SettingsState
+from sales_support_agent.state import AdminState, SettingsState
 from sales_support_agent.styles import colors
 from sales_support_agent.styles.typography import HEADING_FONT, BODY_FONT
 
@@ -226,10 +226,9 @@ def _config_label(text: str) -> rx.Component:
 
 
 _AGENTES_LABELS = {
-    "product": "Assistente de Descrição de Produtos",
-    "prospect": "Prospecção de Leads (/pesquisa)",
-    "priorizacao": "Priorização + Approach (/priorizacao)",
-    "insights": "Insights IA (/insights-ia)",
+    "classificacao": "Classificação de e-mails (Agente 1)",
+    "resumo": "Resumo dos e-mails classificados (Agente 2)",
+    "consulta": "Consulta sobre os e-mails (/consulta)",
 }
 
 
@@ -350,111 +349,6 @@ def _graph_card() -> rx.Component:
     )
 
 
-def _kipflow_card() -> rx.Component:
-    return _integration_card(
-        "KipFlow",
-        _config_label("Base URL"),
-        rx.input(value=SettingsState.kipflow_base_url, on_change=SettingsState.set_kipflow_base_url, width="100%"),
-        _secret_field(
-            "Chave da API", SettingsState.kipflow_api_key_input,
-            SettingsState.set_kipflow_api_key_input, SettingsState.kipflow_api_key_configurado,
-        ),
-        on_save=SettingsState.save_kipflow_settings,
-    )
-
-
-def _hunter_conta(slot: int) -> rx.Component:
-    """Uma conta da Hunter: campo de chave, situação e consumo do ciclo.
-
-    O `slot` é uma int Python (vem de HUNTER_SLOTS, não do State), por isso o
-    `lambda` do `on_change` funciona — é resolvido na compilação, como no card
-    de preço por modelo.
-    """
-    chave = str(slot)
-    return rx.vstack(
-        rx.hstack(
-            _config_label(f"Conta {slot}"),
-            rx.cond(
-                SettingsState.hunter_slot_configurado[chave],
-                rx.hstack(
-                    rx.badge(SettingsState.hunter_slot_uso[chave], color_scheme="green"),
-                    rx.button(
-                        rx.icon(tag="trash-2", size=13),
-                        on_click=SettingsState.remover_hunter_account(slot),
-                        variant="ghost", color_scheme="red", size="1", cursor="pointer",
-                        title=f"Remover a chave da conta {slot}",
-                    ),
-                    align_items="center", spacing="2",
-                ),
-                rx.badge("Vazia", color_scheme="gray"),
-            ),
-            width="100%", align_items="center", justify="between",
-        ),
-        rx.input(
-            value=SettingsState.hunter_key_inputs[chave],
-            on_change=lambda v: SettingsState.set_hunter_key_input(chave, v),
-            type="password",
-            placeholder="Deixe em branco para manter a chave atual",
-            width="100%",
-        ),
-        spacing="1", width="100%",
-    )
-
-
-def _hunter_card() -> rx.Component:
-    """Contas da Hunter, o teto de créditos de cada uma e o dia da renovação.
-
-    São várias contas porque o Hunter vende créditos POR CONTA: somar contas
-    gratuitas multiplica a cota da plataforma sem plano pago, e a busca de
-    e-mail é distribuída entre elas (services/hunter_client.Balanceador).
-
-    O limite fica junto das chaves (e não numa tela de "preferências") porque os
-    dois são a mesma decisão: trocar o plano do Hunter significa novas chaves e
-    novo teto, e separá-los deixaria a plataforma bloqueando buscas que as
-    contas novas já permitem.
-    """
-    return _integration_card(
-        "Hunter.io (e-mail dos contatos)",
-        rx.text(SettingsState.hunter_total_label, size="1", color=colors.TEXT_SEC),
-        *[_hunter_conta(slot) for slot in HUNTER_SLOTS],
-        _config_label("Limite de créditos por ciclo, por conta"),
-        rx.input(
-            value=SettingsState.hunter_creditos_mensais,
-            on_change=SettingsState.set_hunter_creditos_mensais,
-            type="number",
-            placeholder="50",
-            width="100%",
-        ),
-        _config_label("Dia da renovação dos créditos"),
-        rx.input(
-            value=SettingsState.hunter_dia_renovacao,
-            on_change=SettingsState.set_hunter_dia_renovacao,
-            type="number",
-            min=1,
-            max=31,
-            placeholder="1",
-            width="100%",
-        ),
-        rx.text(
-            "Cada e-mail encontrado consome 1 crédito; busca sem resultado não "
-            "consome. O plano gratuito da Hunter dá 50 por ciclo, POR CONTA: o "
-            "orçamento da plataforma é esse número vezes as contas cadastradas. "
-            "Atingido o limite de todas elas, o enriquecimento avisa e segue sem "
-            "os e-mails restantes.",
-            size="1", color=colors.TEXT_SEC,
-        ),
-        rx.text(
-            "A Hunter renova no aniversário da assinatura, não no dia 1º: "
-            "informe o DIA DO MÊS em que as contas foram criadas. É essa data "
-            "que define a janela em que os créditos são contados, e ela vale "
-            "para todas as contas. Se o mês não tiver o dia informado (31 em "
-            "fevereiro), vale o último dia dele.",
-            size="1", color=colors.TEXT_SEC,
-        ),
-        on_save=SettingsState.save_hunter_settings,
-    )
-
-
 def _linha_preco_modelo(modelo: str) -> rx.Component:
     """Entrada e saída de UM modelo, lado a lado.
 
@@ -571,43 +465,22 @@ def admin_dashboard() -> rx.Component:
                 margin_bottom="1rem",
             ),
 
-            # Custo da API KipFlow (enriquecimento) — despesa real com terceiro.
-            # A Hunter entra na mesma linha, mas em CRÉDITOS e num ciclo
-            # próprio (aniversário da assinatura, não o mês civil): "quanto do
-            # pacote já foi usado neste ciclo" é a informação que decide se
-            # ainda dá para buscar e-mail hoje.
-            rx.grid(
-                admin_card("Custo KipFlow (total)", AdminState.kipflow_cost_label, "database-zap"),
-                admin_card("Custo KipFlow (mês)", AdminState.kipflow_cost_month_label, "calendar-clock"),
-                admin_card(
-                    "Créditos Hunter (total)", AdminState.hunter_creditos_label, "at-sign",
-                    subtitle=AdminState.hunter_taxa_acerto_label,
-                ),
-                admin_card(
-                    "Créditos Hunter (ciclo)", AdminState.hunter_creditos_mes_label, "mail-search",
-                    subtitle=AdminState.hunter_renovacao_label,
-                ),
-                columns=rx.breakpoints(initial="1", sm="2"),
-                spacing="4",
-                width="100%",
-                margin_bottom="2rem",
-            ),
-
             # Gráficos mensais (séries independentes, todos na mesma janela de
-            # 6 meses para poderem ser lidos lado a lado)
+            # 6 meses para poderem ser lidos lado a lado).
+            #
+            # Restaram só os de token: os cards e gráficos de KipFlow (em reais)
+            # e Hunter (em créditos) saíram junto com o funil de prospecção, que
+            # era quem consumia essas APIs.
             rx.grid(
                 _chart_card("Custo tokens de entrada em US$ (últimos 6 meses)", AdminState.monthly_input_cost, "#1d548c"),
                 _chart_card("Custo tokens de saída em US$ (últimos 6 meses)", AdminState.monthly_output_cost, "#7c3aed"),
-                _chart_card("Custo KipFlow (últimos 6 meses)", AdminState.monthly_kipflow_cost, "#b45309"),
-                _chart_card("Créditos Hunter (últimos 6 meses)", AdminState.monthly_hunter_creditos, "#15803d"),
                 columns=rx.breakpoints(initial="1", lg="2"),
                 spacing="4",
                 width="100%",
             ),
 
-            # Botão de limpeza dos contadores de consumo (TokenUsage +
-            # KipflowUsage) — fica junto dos cards/gráficos de consumo acima,
-            # não da seção de Planos (que é sobre preço/limites, não consumo).
+            # Botão de limpeza dos contadores de consumo (TokenUsage) — fica
+            # junto dos cards/gráficos de consumo acima.
             rx.hstack(
                 rx.spacer(),
                 rx.button(
@@ -670,20 +543,16 @@ def admin_dashboard() -> rx.Component:
             _section_heading("Configurações de Agentes de IA"),
             rx.grid(
                 _agent_config_card(
-                    "product", SettingsState.product_model, SettingsState.product_effort,
-                    SettingsState.set_product_model, SettingsState.set_product_effort,
+                    "classificacao", SettingsState.classificacao_model, SettingsState.classificacao_effort,
+                    SettingsState.set_classificacao_model, SettingsState.set_classificacao_effort,
                 ),
                 _agent_config_card(
-                    "prospect", SettingsState.prospect_model, SettingsState.prospect_effort,
-                    SettingsState.set_prospect_model, SettingsState.set_prospect_effort,
+                    "resumo", SettingsState.resumo_model, SettingsState.resumo_effort,
+                    SettingsState.set_resumo_model, SettingsState.set_resumo_effort,
                 ),
                 _agent_config_card(
-                    "priorizacao", SettingsState.priorizacao_model, SettingsState.priorizacao_effort,
-                    SettingsState.set_priorizacao_model, SettingsState.set_priorizacao_effort,
-                ),
-                _agent_config_card(
-                    "insights", SettingsState.insights_model, SettingsState.insights_effort,
-                    SettingsState.set_insights_model, SettingsState.set_insights_effort,
+                    "consulta", SettingsState.consulta_model, SettingsState.consulta_effort,
+                    SettingsState.set_consulta_model, SettingsState.set_consulta_effort,
                 ),
                 columns=rx.breakpoints(initial="1", sm="2"),
                 spacing="4", width="100%",
@@ -695,8 +564,6 @@ def admin_dashboard() -> rx.Component:
             _section_heading("Integrações"),
             rx.grid(
                 _graph_card(),
-                _kipflow_card(),
-                _hunter_card(),
                 columns=rx.breakpoints(initial="1", sm="2"),
                 spacing="4", width="100%", margin_bottom="1.5rem",
             ),
@@ -709,13 +576,10 @@ def admin_dashboard() -> rx.Component:
                 on_open_change=AdminState.set_confirm_counters_open,
                 title="Limpar contadores de consumo?",
                 body=(
-                    "Isso apaga todo o histórico de tokens de IA e de custo da "
-                    "KipFlow, zerando os indicadores e os gráficos de consumo. "
-                    "Os créditos da Hunter NÃO são apagados: é a contagem deles "
-                    "que segura a cota do ciclo, e zerá-la faria a plataforma "
-                    "buscar e-mails além do limite contratado. "
-                    "Usuários, leads e logs não são afetados. "
-                    "A ação não pode ser desfeita."
+                    "Isso apaga todo o histórico de consumo de tokens de IA, "
+                    "zerando os indicadores e os gráficos de custo. "
+                    "Usuários, e-mails classificados, execuções e logs não são "
+                    "afetados. A ação não pode ser desfeita."
                 ),
                 confirm_label="Limpar contadores",
                 on_confirm=AdminState.clear_counters,

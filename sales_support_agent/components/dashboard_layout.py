@@ -4,9 +4,11 @@ from sales_support_agent.state import AppState
 from sales_support_agent.styles.typography import BODY_FONT
 
 def sidebar_item(text: str, icon: str, href: str) -> rx.Component:
-    # Compacto de propósito: são até 9 itens + logo + menu do usuário dentro de
-    # 100vh. Cada 4px a mais de padding aqui vira ~36px na coluna inteira, que é
-    # o que fazia a barra de rolagem aparecer em telas de notebook.
+    # Compacto de propósito: o menu encolheu de 9 para 4 itens na conversão para
+    # o Agente de Suporte ao Comercial, mas o espaçamento fica como está. Cada
+    # 4px a mais de padding aqui vira dezenas de px na coluna inteira, que é o
+    # que fazia a barra de rolagem aparecer em telas de notebook, e o menu ainda
+    # pode voltar a crescer.
     return rx.link(
         rx.hstack(
             rx.icon(tag=icon, size=18, flex_shrink="0"),
@@ -84,16 +86,9 @@ def dashboard_layout(*children: rx.Component) -> rx.Component:
 
             rx.vstack(
                 sidebar_item("Dashboard", "layout-dashboard", "/dashboard"),
-                sidebar_item("Lista de Leads", "users", "/leads"),
-                sidebar_item("Produtos", "package", "/produtos"),
-                sidebar_item("Pesquisa", "search", "/pesquisa"),
-                sidebar_item("Enriquecimento", "database-zap", "/enriquecimento"),
-                sidebar_item("Priorização", "target", "/priorizacao"),
-                sidebar_item("Insights IA", "sparkles", "/insights-ia"),
-
-                # ADICIONADO: Link para a página de perfil
+                sidebar_item("Consulta IA", "sparkles", "/consulta"),
                 sidebar_item("Meu Perfil", "circle-user", "/profile"),
-                
+
                 rx.cond(
                     AppState.is_superadmin,
                     sidebar_item("Painel Admin", "shield-alert", "/admin")

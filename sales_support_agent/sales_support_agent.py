@@ -1,4 +1,4 @@
-"""Ponto de entrada da aplicação Reflex — plataforma interna de prospecção da Coester.
+"""Ponto de entrada da aplicação Reflex — Agente de Suporte ao Comercial da Coester.
 
 Aqui só se monta o `rx.App` e se registram as rotas. Toda a lógica vive em
 `state.py` (estados/event handlers), `services/` (regras e integrações) e
@@ -6,9 +6,9 @@ Aqui só se monta o `rx.App` e se registram as rotas. Toda a lógica vive em
 
 Duas formas de registro convivem, de propósito:
 
-* As páginas do funil (`/dashboard`, `/leads`, `/pesquisa`, ...) se declaram com
-  `@rx.page(...)` no próprio módulo, junto do seu `on_load`. Basta importá-las
-  aqui para que o Reflex as registre.
+* As páginas internas (`/dashboard`, `/consulta`, `/profile`, ...) se declaram
+  com `@rx.page(...)` no próprio módulo, junto do seu `on_load`. Basta
+  importá-las aqui para que o Reflex as registre.
 * As três abaixo (`/`, `/login`, `/admin`) são registradas à mão porque não têm
   decorator: a landing e o login não têm `on_load`, e `/admin` precisa de DOIS
   `on_load` de estados diferentes (AdminState + SettingsState).
@@ -21,16 +21,11 @@ import reflex as rx
 
 # Importados pelo efeito colateral do @rx.page — cada módulo registra sua rota.
 from sales_support_agent.pages import (  # noqa: F401
+    consulta,
     dashboard,
-    enrichment,
     forgot_password,
-    insights,
-    leads,
-    priorizacao,
-    products,
     profile,
     reset_password,
-    search_config,
 )
 from sales_support_agent.pages.admin_dashboard import admin_dashboard
 from sales_support_agent.pages.auth import auth_page
