@@ -457,19 +457,422 @@ def modelo_do_agente(agent_name: str) -> str:
     return get_agent_config(chave)[0] if chave else ""
 
 
-class DashboardState(AppState):
-    """Dashboard do usuário padrão.
+class EmailUI(BaseModel):
+    """Linha da tabela e do painel de urgências, já achatada.
 
-    Esqueleto. O conteúdo real (métricas das rodadas de classificação,
-    configuração de horários e pastas, botão de classificar agora e tabela de
-    e-mails classificados) entra na Fase 8, junto com `services/emails_query.py`.
-    Aqui fica só o gate de autenticação, para a rota continuar existindo e
-    protegida enquanto o resto é construído.
+    Achatada porque o `foreach` do Reflex não acessa dicionário aninhado
+    tipado: o serviço entrega campos de topo e a UI só lê.
     """
 
+    id: int
+    assunto: str
+    cliente: str
+    recebido_em: str
+    classe_label: str
+    urgente: bool
+    resumo: str = ""
+    acao_sugerida: str = ""
+
+
+class PastaUI(BaseModel):
+    classe: str
+    classe_label: str
+    pasta_nome: str
+    pasta_caminho: str
+    resolvido: bool
+    erro_resolucao: str
+
+
+class DashboardState(AppState):
+    """Dashboard do usuário padrão: a tela operacional do Agente 1.
+
+    ATENÇÃO: esta versão do Reflex NÃO gera setters automáticos. Todo campo
+    ligado a `on_change` precisa do seu `set_<campo>` escrito à mão aqui
+    embaixo, e esquecer quebra em runtime, não na compilação.
+    """
+
+    # --- métricas ---
+    duracao_media: str = "-"
+    duracao_ultima: str = "-"
+    total_classificados: int = 0
+    ultima_rodada_classificados: int = 0
+    ultima_rodada_quando: str = "-"
+    ultima_rodada_origem: str = ""
+
+    # --- execução ---
+    is_running: bool = False
+    progresso_texto: str = ""
+    progresso_atual: int = 0
+    progresso_total: int = 0
+
+    # --- configuração (espelha ClassificacaoConfig) ---
+    horario_1: str = "08:00"
+    horario_2: str = "16:00"
+    janela_urgencia_horas: str = "24"
+    lookback_horas: str = "48"
+    proxima_execucao: str = "-"
+
+    # --- pastas ---
+    pastas: List[PastaUI] = []
+    pasta_inputs: Dict[str, str] = {}
+    pastas_disponiveis: List[str] = []
+    listando_pastas: bool = False
+
+    # --- tabela ---
+    emails: List[EmailUI] = []
+    urgentes: List[EmailUI] = []
+    filtro_data_inicio: str = ""
+    filtro_data_fim: str = ""
+    filtro_apenas_urgentes: bool = False
+
+    # --- diálogo de detalhe ---
+    detalhe_aberto: bool = False
+    detalhe_assunto: str = ""
+    detalhe_cliente: str = ""
+    detalhe_recebido: str = ""
+    detalhe_classe: str = ""
+    detalhe_urgente: bool = False
+    detalhe_resumo: str = ""
+    detalhe_pontos: List[str] = []
+    detalhe_acao: str = ""
+    detalhe_prazo: str = ""
+    detalhe_disponivel: bool = False
+    detalhe_link: str = ""
+
+    # ------------------------------------------------------- setters à mão
+    def set_horario_1(self, value: str):
+        self.horario_1 = value
+
+    def set_horario_2(self, value: str):
+        self.horario_2 = value
+
+    def set_janela_urgencia_horas(self, value: str):
+        self.janela_urgencia_horas = value
+
+    def set_lookback_horas(self, value: str):
+        self.lookback_horas = value
+
+    def set_filtro_data_inicio(self, value: str):
+        self.filtro_data_inicio = value
+        return DashboardState.carregar_tabela
+
+    def set_filtro_data_fim(self, value: str):
+        self.filtro_data_fim = value
+        return DashboardState.carregar_tabela
+
+    def set_filtro_apenas_urgentes(self, value: bool):
+        self.filtro_apenas_urgentes = value
+        return DashboardState.carregar_tabela
+
+    def set_pasta_input(self, classe: str, value: str):
+        self.pasta_inputs[classe] = value
+
+    def set_detalhe_aberto(self, value: bool):
+        self.detalhe_aberto = value
+
+    def limpar_filtros(self):
+        self.filtro_data_inicio = ""
+        self.filtro_data_fim = ""
+        self.filtro_apenas_urgentes = False
+        return DashboardState.carregar_tabela
+
+    # ------------------------------------------------------- load
     def load_dashboard_data(self):
         if not self.is_authenticated:
             return rx.redirect("/login")
+
+        from sales_support_agent.services import classificacao, classificacao_config
+        from sales_support_agent.services.classificacao_rules import rotulo
+
+        # Uma rodada que morreu com o processo deixaria a tela girando para
+        # sempre e travaria a próxima. Recuperar aqui é o que garante que abrir
+        # o dashboard sempre mostra um estado coerente.
+        classificacao.recuperar_rodada_travada(self.tenant_id)
+        classificacao_config.ensure_config(self.tenant_id)
+        classificacao_config.ensure_pastas(self.tenant_id)
+
+        cfg = classificacao_config.get_config(self.tenant_id)
+        self.horario_1 = cfg["horario_1"]
+        self.horario_2 = cfg["horario_2"]
+        self.janela_urgencia_horas = str(cfg["janela_urgencia_horas"])
+        self.lookback_horas = str(cfg["lookback_horas"])
+
+        proxima = classificacao_config.proxima_execucao(brt_now(), cfg)
+        self.proxima_execucao = proxima.strftime("%d/%m/%Y %H:%M") if proxima else "-"
+
+        self.pastas = [
+            PastaUI(
+                classe=p["classe"],
+                classe_label=rotulo(p["classe"]),
+                pasta_nome=p["pasta_nome"],
+                pasta_caminho=p["pasta_caminho"],
+                resolvido=p["resolvido"],
+                erro_resolucao=p["erro_resolucao"],
+            )
+            for p in classificacao_config.get_pastas(self.tenant_id)
+        ]
+        self.pasta_inputs = {p.classe: p.pasta_nome for p in self.pastas}
+
+        self.is_running = classificacao.ha_rodada_em_andamento(self.tenant_id)
+        self._carregar_metricas()
+        self.carregar_tabela()
+
+    def _carregar_metricas(self):
+        from sales_support_agent.services import emails_query
+
+        m = emails_query.metricas_execucao(self.tenant_id)
+        self.duracao_media = m["duracao_media"]
+        self.duracao_ultima = m["duracao_ultima"]
+        self.total_classificados = m["total_classificados"]
+        self.ultima_rodada_classificados = m["ultima_rodada_classificados"]
+        self.ultima_rodada_quando = m["ultima_rodada_quando"]
+        self.ultima_rodada_origem = m["ultima_rodada_origem"]
+
+    def carregar_tabela(self):
+        from sales_support_agent.services import emails_query
+
+        def _ui(dados: dict) -> EmailUI:
+            return EmailUI(
+                id=dados["id"],
+                assunto=dados["assunto"],
+                cliente=dados["cliente"],
+                recebido_em=dados["recebido_em"],
+                classe_label=dados["classe_label"],
+                urgente=dados["urgente"],
+                resumo=dados.get("resumo", ""),
+                acao_sugerida=dados.get("acao_sugerida", ""),
+            )
+
+        self.emails = [
+            _ui(d)
+            for d in emails_query.listar_emails(
+                self.tenant_id,
+                data_inicio=self.filtro_data_inicio,
+                data_fim=self.filtro_data_fim,
+                apenas_urgentes=self.filtro_apenas_urgentes,
+            )
+        ]
+        self.urgentes = [_ui(d) for d in emails_query.urgencias(self.tenant_id, limite=10)]
+
+    @rx.var
+    def sem_emails(self) -> bool:
+        return len(self.emails) == 0
+
+    @rx.var
+    def sem_urgentes(self) -> bool:
+        return len(self.urgentes) == 0
+
+    @rx.var
+    def pastas_pendentes(self) -> bool:
+        return any(not p.resolvido for p in self.pastas)
+
+    # ------------------------------------------------------- configuração
+    def salvar_configuracao(self):
+        from sales_support_agent.services import agendador, classificacao_config, emails_query
+
+        for rotulo_campo, valor in (("horário 1", self.horario_1), ("horário 2", self.horario_2)):
+            if not _hhmm_ok(valor):
+                return toast_error(f"O {rotulo_campo} precisa estar no formato HH:MM.")
+
+        try:
+            janela = int(self.janela_urgencia_horas)
+            lookback = int(self.lookback_horas)
+        except (TypeError, ValueError):
+            return toast_error("A janela de urgência e o lookback precisam ser números inteiros.")
+        if janela < 1 or lookback < 1:
+            return toast_error("A janela de urgência e o lookback precisam ser maiores que zero.")
+
+        classificacao_config.salvar_config(
+            self.tenant_id,
+            horario_1=self.horario_1,
+            horario_2=self.horario_2,
+            janela_urgencia_horas=janela,
+            lookback_horas=lookback,
+        )
+
+        # Mudar a janela re-marca os e-mails JÁ classificados, com um UPDATE.
+        # É para isso que o prazo em horas fica guardado separado do booleano:
+        # sem ele, a mesma mudança exigiria reprocessar a caixa no modelo.
+        alteradas = emails_query.recalcular_urgencia(self.tenant_id, janela)
+
+        # Sem reiniciar o servidor: o agendador relê os horários agora.
+        agendador.reprogramar(self.tenant_id)
+
+        with rx.session() as session:
+            self.log_activity(
+                "CONFIG_CLASSIFICACAO",
+                f"Horários {self.horario_1} e {self.horario_2}, janela de urgência {janela}h.",
+                session,
+            )
+
+        recado = "Configuração salva."
+        if alteradas:
+            recado += f" {alteradas} e-mail(s) tiveram a marcação de urgente revista."
+        return [toast_success(recado), DashboardState.load_dashboard_data]
+
+    @rx.event(background=True)
+    async def listar_pastas_do_outlook(self):
+        """Busca as pastas para o usuário escolher em vez de digitar."""
+        async with self:
+            if self.listando_pastas:
+                return
+            self.listando_pastas = True
+
+        from sales_support_agent.services import graph_client
+        from sales_support_agent.services.graph_client import GraphClientError
+
+        try:
+            pastas = await graph_client.listar_pastas()
+        except GraphClientError as erro:
+            async with self:
+                self.listando_pastas = False
+            yield toast_error(erro.mensagem)
+            return
+
+        async with self:
+            self.pastas_disponiveis = sorted(p["caminho"] for p in pastas)
+            self.listando_pastas = False
+        yield toast_success(f"{len(pastas)} pasta(s) encontradas na caixa.")
+
+    @rx.event(background=True)
+    async def salvar_pasta(self, classe: str):
+        """Resolve o NOME digitado para o id da pasta, pelo Graph.
+
+        O usuário nunca vê nem digita um id. Nome ambíguo NÃO sobrescreve o
+        mapeamento que já funcionava: uma tentativa malsucedida de
+        reconfiguração não pode derrubar a rodada agendada seguinte.
+        """
+        async with self:
+            nome = (self.pasta_inputs.get(classe) or "").strip()
+            tenant_id = self.tenant_id
+
+        if not nome:
+            yield toast_error("Informe o nome da pasta.")
+            return
+
+        from sales_support_agent.services import classificacao_config, graph_client
+        from sales_support_agent.services.graph_client import GraphClientError
+
+        try:
+            achado = await graph_client.resolver_pasta(nome)
+        except GraphClientError as erro:
+            yield toast_error(erro.mensagem)
+            return
+
+        if not achado["encontrado"]:
+            if achado["candidatos"]:
+                caminhos = ", ".join(achado["candidatos"])
+                recado = (
+                    f"Há mais de uma pasta chamada '{nome}': {caminhos}. "
+                    "Informe o caminho completo para não arquivar no lugar errado."
+                )
+            else:
+                recado = f"Não encontrei a pasta '{nome}' na caixa configurada."
+
+            classificacao_config.salvar_pasta(
+                tenant_id, classe, pasta_nome=nome, erro_resolucao=recado
+            )
+            yield toast_error(recado)
+            yield DashboardState.load_dashboard_data
+            return
+
+        classificacao_config.salvar_pasta(
+            tenant_id, classe, pasta_nome=nome,
+            pasta_id=achado["id"], pasta_caminho=achado["caminho"],
+        )
+        yield toast_success(f"Pasta '{achado['caminho']}' vinculada.")
+        yield DashboardState.load_dashboard_data
+
+    # ------------------------------------------------------- execução manual
+    @rx.event(background=True)
+    async def classificar_agora(self):
+        """Dispara a MESMA rodada que o agendador dispara.
+
+        Um caminho de código só é o que faz este botão ser um teste de verdade
+        do que roda sozinho às 08:00.
+        """
+        async with self:
+            if self.is_running:
+                yield toast_error("Já existe uma classificação em andamento.")
+                return
+            tenant_id = self.tenant_id
+            user_email = self.user_email
+            self.is_running = True
+            self.progresso_texto = "Preparando..."
+            self.progresso_atual = 0
+            self.progresso_total = 0
+
+        from sales_support_agent.services import agendador, classificacao
+
+        run_id = agendador.reivindicar_rodada(
+            tenant_id, origem="manual", user_email=user_email
+        )
+        if run_id is None:
+            async with self:
+                self.is_running = False
+                self.progresso_texto = ""
+            yield toast_error("Já existe uma classificação em andamento.")
+            return
+
+        resumo, erro = None, ""
+        async for evento in classificacao.stream_classificacao(
+            tenant_id, user_email=user_email, origem="manual", run_id=run_id
+        ):
+            if evento[0] == "progress":
+                async with self:
+                    self.progresso_atual = evento[1]
+                    self.progresso_total = evento[2]
+                    self.progresso_texto = evento[3]
+            elif evento[0] == "done":
+                resumo = evento[1]
+            elif evento[0] == "error":
+                erro = evento[1]
+
+        agendador.finalizar_rodada(run_id, resumo or {}, erro)
+
+        async with self:
+            self.is_running = False
+            self.progresso_texto = ""
+
+        if erro:
+            yield toast_error(erro)
+        else:
+            r = resumo or {}
+            yield toast_success(
+                f"{r.get('classificados', 0)} classificado(s), "
+                f"{r.get('ignorados', 0)} ignorado(s), "
+                f"{r.get('puladas', 0)} já conhecido(s)."
+            )
+        yield DashboardState.load_dashboard_data
+
+    # ------------------------------------------------------- detalhe
+    def abrir_detalhe(self, email_id: int):
+        from sales_support_agent.services import emails_query
+
+        dados = emails_query.detalhe_email(self.tenant_id, email_id)
+        if not dados:
+            return toast_error("E-mail não encontrado.")
+
+        self.detalhe_assunto = dados["assunto"]
+        self.detalhe_cliente = dados["cliente"]
+        self.detalhe_recebido = dados["recebido_em"]
+        self.detalhe_classe = dados["classe_label"]
+        self.detalhe_urgente = dados["urgente"]
+        self.detalhe_resumo = dados["resumo"]
+        self.detalhe_pontos = dados["pontos_chave"]
+        self.detalhe_acao = dados["acao_sugerida"]
+        self.detalhe_prazo = dados["prazo_mencionado"] or "-"
+        self.detalhe_disponivel = dados["resumo_disponivel"]
+        self.detalhe_link = dados["web_link"]
+        self.detalhe_aberto = True
+
+
+def _hhmm_ok(texto: str) -> bool:
+    try:
+        horas, minutos = str(texto).split(":")
+        return 0 <= int(horas) <= 23 and 0 <= int(minutos) <= 59
+    except (ValueError, AttributeError):
+        return False
 
 
 class ChatMessageUI(BaseModel):
