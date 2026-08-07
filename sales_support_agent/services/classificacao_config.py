@@ -1,0 +1,256 @@
+"""Configuração operacional do Agente 1: horários, janela de urgência e pastas.
+
+Separado de `services/settings.py` de propósito. Aquele guarda CREDENCIAL, é do
+super admin, e o que a UI lê de lá é só um booleano "configurado". Este guarda
+configuração de operação, é editado pelo usuário PADRÃO no `/dashboard`, é por
+organização, e a UI precisa ler os valores de volta para reexibi-los.
+
+Mesma disciplina de `ensure_*` do resto do projeto: cria o que falta e NUNCA
+sobrescreve o que já existe, para que rodar o seed de novo não apague a
+configuração de quem já usa.
+
+Sem cache: cada leitura abre sessão e consulta na hora, para que uma mudança
+valha na próxima rodada sem reiniciar o servidor.
+"""
+
+from datetime import datetime, timedelta
+from typing import Optional
+
+import reflex as rx
+
+from sales_support_agent.models import ClassificacaoConfig, PastaClasse, brt_now
+from sales_support_agent.services.classificacao_rules import CLASSES, PASTAS_PADRAO
+
+
+# ---------------------------------------------------------------------------
+# Configuração geral
+# ---------------------------------------------------------------------------
+
+
+def ensure_config(tenant_id: int) -> None:
+    """Cria a linha de configuração da organização, se ainda não existir."""
+    with rx.session() as session:
+        linha = (
+            session.query(ClassificacaoConfig)
+            .filter(ClassificacaoConfig.tenant_id == tenant_id)
+            .first()
+        )
+        if not linha:
+            session.add(ClassificacaoConfig(tenant_id=tenant_id))
+            session.commit()
+
+
+def get_config(tenant_id: int) -> dict:
+    """Configuração como dicionário achatado.
+
+    Achatado porque o `foreach` do Reflex não acessa dicionário aninhado
+    tipado, e porque quem consome isto (o orquestrador e o dashboard) não deve
+    depender do objeto do SQLModel continuar vivo depois que a sessão fecha.
+    """
+    with rx.session() as session:
+        linha = (
+            session.query(ClassificacaoConfig)
+            .filter(ClassificacaoConfig.tenant_id == tenant_id)
+            .first()
+        )
+        if not linha:
+            linha = ClassificacaoConfig(tenant_id=tenant_id)
+
+        return {
+            "horario_1": linha.horario_1,
+            "horario_2": linha.horario_2,
+            "janela_urgencia_horas": int(linha.janela_urgencia_horas),
+            "lookback_horas": int(linha.lookback_horas),
+            "max_emails_por_execucao": int(linha.max_emails_por_execucao),
+            "ativo": bool(linha.ativo),
+            "ultima_execucao_agendada": linha.ultima_execucao_agendada,
+        }
+
+
+def salvar_config(tenant_id: int, **campos) -> None:
+    """Grava só os campos passados (chave ausente não é tocada)."""
+    with rx.session() as session:
+        linha = (
+            session.query(ClassificacaoConfig)
+            .filter(ClassificacaoConfig.tenant_id == tenant_id)
+            .first()
+        )
+        if not linha:
+            linha = ClassificacaoConfig(tenant_id=tenant_id)
+            session.add(linha)
+
+        for chave, valor in campos.items():
+            setattr(linha, chave, valor)
+        linha.updated_at = brt_now()
+        session.commit()
+
+
+def marcar_execucao_agendada(tenant_id: int, quando: Optional[datetime] = None) -> None:
+    """Registra que um horário agendado já disparou.
+
+    É o que impede o mesmo horário de rodar duas vezes no mesmo dia quando o
+    agendador acorda mais de uma vez, e o que `slot_devido` consulta.
+    """
+    salvar_config(tenant_id, ultima_execucao_agendada=quando or brt_now())
+
+
+# ---------------------------------------------------------------------------
+# Qual horário está vencido
+# ---------------------------------------------------------------------------
+
+
+def _hhmm_valido(texto: str) -> bool:
+    try:
+        horas, minutos = texto.split(":")
+        return 0 <= int(horas) <= 23 and 0 <= int(minutos) <= 59
+    except (ValueError, AttributeError):
+        return False
+
+
+def _momento_de_hoje(agora: datetime, hhmm: str) -> datetime:
+    horas, minutos = (int(p) for p in hhmm.split(":"))
+    return agora.replace(hour=horas, minute=minutos, second=0, microsecond=0)
+
+
+def slot_devido(agora: datetime, cfg: dict) -> Optional[str]:
+    """Qual horário automático está vencido e ainda não rodou hoje.
+
+    Função PURA: recebe o instante e a configuração, devolve `"h1"`, `"h2"` ou
+    `None`. Sem I/O, o que a torna exaustivamente testável sem manipular relógio.
+
+    Ela dá recuperação de graça, e é por isso que a decisão não é simplesmente
+    "disparar no horário": se a máquina estava desligada às 08:00 e o servidor
+    sobe às 09:20, o horário 1 ainda consta como não disparado hoje e a rodada
+    acontece. Um gatilho que só olha o instante exato perderia a janela.
+
+    Quando os dois estão vencidos, devolve o MAIS TARDE: ele varre uma janela
+    maior e cobre o que o outro teria pego.
+    """
+    if not cfg.get("ativo", True):
+        return None
+
+    ultima = cfg.get("ultima_execucao_agendada")
+    candidatos = []
+    for slot, chave in (("h1", "horario_1"), ("h2", "horario_2")):
+        hhmm = (cfg.get(chave) or "").strip()
+        if not _hhmm_valido(hhmm):
+            continue
+        momento = _momento_de_hoje(agora, hhmm)
+        if momento > agora:
+            continue  # ainda não chegou
+        if ultima is not None and ultima >= momento:
+            continue  # já rodou depois deste horário
+        candidatos.append((momento, slot))
+
+    if not candidatos:
+        return None
+    return max(candidatos)[1]
+
+
+def proxima_execucao(agora: datetime, cfg: dict) -> Optional[datetime]:
+    """Quando o próximo horário automático dispara. Só para exibir no painel."""
+    if not cfg.get("ativo", True):
+        return None
+
+    momentos = []
+    for chave in ("horario_1", "horario_2"):
+        hhmm = (cfg.get(chave) or "").strip()
+        if not _hhmm_valido(hhmm):
+            continue
+        momento = _momento_de_hoje(agora, hhmm)
+        momentos.append(momento if momento > agora else momento + timedelta(days=1))
+
+    return min(momentos) if momentos else None
+
+
+# ---------------------------------------------------------------------------
+# Pastas por classe
+# ---------------------------------------------------------------------------
+
+
+def ensure_pastas(tenant_id: int) -> None:
+    """Cria as quatro linhas de pasta, com nome sugerido e id ainda vazio.
+
+    O id fica vazio de propósito: quem resolve nome para id é o Graph, na hora
+    em que o usuário salva. Uma linha com `pasta_id` vazio é o sinal de que a
+    configuração ainda não está completa, e é o que faz o orquestrador recusar
+    a rodada antes de gastar o primeiro token.
+    """
+    with rx.session() as session:
+        existentes = {
+            p.classe
+            for p in session.query(PastaClasse).filter(PastaClasse.tenant_id == tenant_id).all()
+        }
+        novas = [
+            PastaClasse(tenant_id=tenant_id, classe=classe, pasta_nome=PASTAS_PADRAO[classe])
+            for classe in CLASSES
+            if classe not in existentes
+        ]
+        if novas:
+            session.add_all(novas)
+            session.commit()
+
+
+def get_pastas(tenant_id: int) -> list:
+    """As quatro pastas, achatadas e sempre na ordem de `CLASSES`."""
+    with rx.session() as session:
+        por_classe = {
+            p.classe: p
+            for p in session.query(PastaClasse).filter(PastaClasse.tenant_id == tenant_id).all()
+        }
+
+    resultado = []
+    for classe in CLASSES:
+        linha = por_classe.get(classe)
+        resultado.append(
+            {
+                "classe": classe,
+                "pasta_nome": linha.pasta_nome if linha else PASTAS_PADRAO[classe],
+                "pasta_caminho": linha.pasta_caminho if linha else "",
+                "pasta_id": linha.pasta_id if linha else "",
+                "resolvido": bool(linha and linha.pasta_id),
+                "erro_resolucao": linha.erro_resolucao if linha else "",
+            }
+        )
+    return resultado
+
+
+def salvar_pasta(
+    tenant_id: int,
+    classe: str,
+    *,
+    pasta_nome: str,
+    pasta_id: str = "",
+    pasta_caminho: str = "",
+    erro_resolucao: str = "",
+) -> None:
+    """Grava o mapeamento de uma classe.
+
+    `pasta_id` vazio NÃO apaga o id já resolvido: se o usuário salvou um nome
+    ambíguo ou inexistente, a mensagem de erro é gravada mas o mapeamento que
+    funcionava continua valendo. O contrário faria uma tentativa malsucedida de
+    reconfiguração derrubar a rodada agendada seguinte.
+    """
+    with rx.session() as session:
+        linha = (
+            session.query(PastaClasse)
+            .filter(PastaClasse.tenant_id == tenant_id, PastaClasse.classe == classe)
+            .first()
+        )
+        if not linha:
+            linha = PastaClasse(tenant_id=tenant_id, classe=classe)
+            session.add(linha)
+
+        linha.pasta_nome = pasta_nome
+        linha.erro_resolucao = erro_resolucao
+        if pasta_id:
+            linha.pasta_id = pasta_id
+            linha.pasta_caminho = pasta_caminho
+            linha.resolvido_em = brt_now()
+        linha.updated_at = brt_now()
+        session.commit()
+
+
+def pastas_pendentes(tenant_id: int) -> list:
+    """Classes ainda sem `pasta_id`. Vazio significa configuração completa."""
+    return [p["classe"] for p in get_pastas(tenant_id) if not p["resolvido"]]

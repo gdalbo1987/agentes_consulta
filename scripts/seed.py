@@ -76,6 +76,10 @@ def main() -> None:
         else:
             print(f"Organização já existia: {ORGANIZACAO} (id={tenant.id})")
 
+        # Guardado antes da sessão fechar: os `ensure_*` do fim abrem sessão
+        # própria e receberiam um objeto desanexado.
+        tenant_id = tenant.id
+
         user = session.exec(
             select(User).where(User.email == SUPER_ADMIN_EMAIL)
         ).first()
@@ -111,8 +115,14 @@ def main() -> None:
             session.commit()
             print(f"Super admin criado: {SUPER_ADMIN_EMAIL}")
 
-    # As duas funções abrem sua própria sessão (via rx.session) e são
-    # idempotentes — mesma rotina que o /admin já executa no on_load.
+    # Todas abrem sua própria sessão (via rx.session) e são idempotentes:
+    # criam o que falta e nunca sobrescrevem o que já existe. É a mesma rotina
+    # que o `/admin` e o `/dashboard` executam no on_load, então rodar o seed
+    # de novo numa instalação em uso não apaga configuração de ninguém.
+    from sales_support_agent.services.classificacao_config import (
+        ensure_config,
+        ensure_pastas,
+    )
     from sales_support_agent.services.settings import (
         ensure_agent_settings,
         ensure_integration_settings,
@@ -120,7 +130,17 @@ def main() -> None:
 
     ensure_agent_settings()
     ensure_integration_settings()
-    print("Configurações de agentes e integrações semeadas.")
+    print("Configurações de agentes e da Microsoft Graph semeadas.")
+
+    # As quatro pastas nascem com nome sugerido e SEM id: quem resolve nome para
+    # id é o Graph, quando o usuário salvar no dashboard. Enquanto algum id
+    # estiver vazio, o orquestrador recusa a rodada antes de gastar token.
+    ensure_config(tenant_id)
+    ensure_pastas(tenant_id)
+    print(
+        "Configuração da classificação semeada. Mapeie as pastas do Outlook em "
+        "/dashboard antes da primeira execução."
+    )
 
 
 if __name__ == "__main__":

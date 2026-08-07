@@ -1,6 +1,6 @@
 import reflex as rx
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Column, Text
+from sqlalchemy import Column, Text, UniqueConstraint
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
@@ -42,16 +42,6 @@ class User(SQLModel, table=True):
     tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id")
     is_superadmin: bool = Field(default=False)
 
-class Lead(SQLModel, table=True):
-    """Tabela operacional: Leads de um cliente específico."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    email: str
-    score: int = Field(default=0)
-    
-    # A trava de segurança: Todo lead pertence a um Tenant
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-
 class ActivityLog(SQLModel, table=True):
     """Rastreamento de tudo o que acontece (Audit Log)."""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -62,13 +52,6 @@ class ActivityLog(SQLModel, table=True):
     
     # Aqui também trocamos pela nossa nova função
     timestamp: datetime = Field(default_factory=brt_now)
-
-class Product(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id")
-    name: str
-    description: str
-    created_at: datetime = Field(default_factory=brt_now)
 
 class TokenUsage(SQLModel, table=True):
     """Consumo de tokens dos modelos (entrada e saída são contados separadamente,
@@ -109,266 +92,6 @@ class TokenPricing(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=brt_now)
 
 
-class SearchConfig(SQLModel, table=True):
-    """Parâmetros da pesquisa de prospecção por tenant (uma linha por tenant).
-    Uma nova pesquisa SOBRESCREVE estes campos — não é histórico versionado
-    (o histórico das execuções fica em SearchRun)."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True, unique=True)
-    product_ids: str = Field(default="[]")  # lista JSON de Product.id selecionados
-    regiao: str = ""
-    segmento: str = ""
-    last_search_at: Optional[datetime] = None
-    updated_at: datetime = Field(default_factory=brt_now)
-
-
-class SearchRun(SQLModel, table=True):
-    """Execução (versionada) da pesquisa de prospecção: status + JSON de resultado."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    # Quem disparou a execução. É por esta coluna que a cota mensal de 20
-    # consultas é contada (o limite é POR USUÁRIO, não pela organização) e é
-    # dela que sai o "coletor" propagado para ProspectCompany.user_email.
-    user_email: str = Field(default="", index=True)
-    pesquisa_id: str = Field(index=True)  # uuid4
-    status: str = "running"  # running | done | error
-    regiao: str = ""  # snapshot da entrada no momento da execução
-    segmento: str = ""
-    total_empresas: int = Field(default=0)
-    meta_atingida: bool = Field(default=False)
-    resumo: str = ""
-    erro: str = ""
-    result_json: str = Field(default="", sa_column=Column(Text))
-    started_at: datetime = Field(default_factory=brt_now)
-    finished_at: Optional[datetime] = None
-
-
-class ProspectCompany(SQLModel, table=True):
-    """Empresa da fase de pesquisa MATERIALIZADA como registro + campos da fase
-    de enriquecimento (KipFlow).
-
-    A fase de pesquisa grava as empresas apenas dentro de SearchRun.result_json
-    (um blob de texto). Esta tabela é a materialização desse JSON: sem ela não
-    há PK por empresa, índice por CNPJ nem onde guardar enrichment_status.
-    O preenchimento é feito por services/enrichment.ensure_companies_materialized,
-    que é idempotente (rodar de novo não duplica)."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    search_run_id: int = Field(foreign_key="searchrun.id", index=True)
-    # Usuário que coletou a empresa — copiado do SearchRun que a originou, em
-    # ensure_companies_materialized. Denormalizado de propósito: o filtro por
-    # usuário em /leads é uma consulta direta, sem join com searchrun.
-    user_email: str = Field(default="", index=True)
-
-    # --- origem: copiado de EmpresaICP (services/prospect_agent.py) ---
-    nome: str
-    website: Optional[str] = None
-    localizacao: str = ""
-    segmento_identificado: str = ""
-    icp_score: int = Field(default=0)
-    justificativa_match: str = ""
-
-    # --- chaves canônicas (dedupe + idempotência) ---
-    cnpj: Optional[str] = Field(default=None, index=True)  # 14 dígitos (zfill)
-    dominio: Optional[str] = Field(default=None, index=True)
-
-    # --- os 12 campos do enriquecimento (2 = cnpj acima; 11 e 12 = CompanyContact) ---
-    razao_social: Optional[str] = None                # 1
-    cidade: Optional[str] = None                      # 3
-    estado: Optional[str] = None                      # 3
-    endereco: Optional[str] = None                    # vem de graça no mesmo dataset
-    bairro: Optional[str] = None
-    cep: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    data_inicio_atividade: Optional[str] = None       # 4 (origem do cálculo)
-    idade_empresa_anos: Optional[int] = None          # 4 (calculado em Python)
-    porte: Optional[str] = None                       # 5 Pequena | Média | Grande
-    porte_original: Optional[str] = None              # valor cru da API (ex.: DEMAIS)
-    segmento: Optional[str] = None                    # 6
-    faturamento_estimado: Optional[str] = None        # 7 é uma FAIXA, não valor exato
-    status_cadastral: Optional[str] = None            # 8 Ativa | Inativa | Baixada
-    status_cadastral_original: Optional[str] = None   # valor cru da Receita
-    # Situação especial (recuperação judicial, falência, liquidação...).
-    # NÃO é redundante com status_cadastral: a Receita mantém a empresa como
-    # "ATIVA" mesmo em recuperação judicial — foi o caso da Real Auto Ônibus.
-    # Vem do campo `situacao_especial` da Receita (gratuito) e serve como
-    # critério de priorização/risco para a próxima fase do funil.
-    alerta_situacao: Optional[str] = Field(default=None, index=True)
-    alerta_situacao_desde: Optional[str] = None
-    website_principal: Optional[str] = None           # 9
-    telefone: Optional[str] = None                    # 10
-    telefone_whatsapp: bool = Field(default=False)
-    linkedin_url: Optional[str] = None                # insumo para buscar decisores
-
-    # --- controle do enriquecimento ---
-    # pending | in_progress | completed | partial | failed
-    enrichment_status: str = Field(default="pending", index=True)
-    enrichment_percentage: int = Field(default=0)
-    enriched_at: Optional[datetime] = None
-    enrichment_errors: str = Field(default="[]", sa_column=Column(Text))  # lista JSON
-    # Payload bruto da KipFlow: permite reprocessar/remapear sem gastar crédito de novo.
-    kipflow_raw_response: str = Field(default="", sa_column=Column(Text))
-    kipflow_cost: float = Field(default=0.0)
-    created_at: datetime = Field(default_factory=brt_now)
-
-    # --- priorização (fase 3): pontuação calculada sobre o lead já enriquecido ---
-    # pending | done | failed
-    priorizacao_status: str = Field(default="pending", index=True)
-    priorizacao_score_final: Optional[int] = None
-    priorizacao_classe: Optional[str] = None  # Alta | Média | Baixa
-    # JSON: lista de 7 objetos {"criterio","pontos","justificativa"}. Não são
-    # 14 colunas separadas pelo mesmo motivo de enrichment_errors/
-    # kipflow_raw_response: nada no projeto filtra por critério individual, só
-    # por priorizacao_score_final/priorizacao_classe (esses sim são colunas).
-    priorizacao_criterios: str = Field(default="", sa_column=Column(Text))
-    priorizacao_executado_em: Optional[datetime] = None
-    priorizacao_erro: str = ""
-
-    # --- approach (fase 3, opcional por lead): dicas de primeiro contato ---
-    approach_status: str = Field(default="pending", index=True)  # pending | done | failed
-    approach_dicas: str = Field(default="", sa_column=Column(Text))  # JSON: 2-4 dicas
-    approach_executado_em: Optional[datetime] = None
-    approach_erro: str = ""
-
-
-class CompanyContact(SQLModel, table=True):
-    """Contato decisor de uma empresa (1:N com ProspectCompany)."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    company_id: int = Field(foreign_key="prospectcompany.id", index=True)
-    nome: str
-    cargo: str = ""
-    senioridade: str = ""
-    area: str = ""
-    perfil_url: str = ""
-    perfil_public_id: Optional[str] = None  # chave de dedupe entre execuções
-    # De onde veio o contato — muda COMO abordar, não é só metadado:
-    #   "qsa"      -> sócio/administrador do quadro societário (Receita Federal,
-    #                 gratuito). É o decisor de fato, mas sem canal direto:
-    #                 aborda-se pelo telefone/e-mail da empresa pedindo por ele.
-    #   "linkedin" -> perfil do LinkedIn (KipFlow, pago). Tem canal direto
-    #                 (perfil_url), porém costuma ser de senioridade menor.
-    origem: str = Field(default="linkedin")
-
-    # --- e-mail profissional (Hunter.io, ver services/hunter_client.py) ---
-    email: str = Field(default="")
-    # Confiança do Hunter (0-100). Abaixo de ~70 o e-mail é um palpite de
-    # padrão ("nome.sobrenome@dominio") sem fonte pública confirmada, então o
-    # score é exibido junto: quem for disparar e-mail precisa saber a diferença.
-    email_confianca: Optional[int] = None
-    # Marca a TENTATIVA, não o sucesso. É o que impede gastar um crédito duas
-    # vezes no mesmo contato quando o enriquecimento roda de novo — sem ela,
-    # cada reprocessamento queimaria a cota do ciclo inteira de novo.
-    email_buscado_em: Optional[datetime] = None
-
-    created_at: datetime = Field(default_factory=brt_now)
-
-
-class EnrichmentRun(SQLModel, table=True):
-    """Execução do processo de enriquecimento (alimenta o painel de status)."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    user_email: str = Field(default="", index=True)  # cota mensal por usuário
-    search_run_id: int = Field(foreign_key="searchrun.id", index=True)
-    status: str = "running"  # running | done | error
-    total_empresas: int = Field(default=0)
-    processadas: int = Field(default=0)
-    puladas: int = Field(default=0)  # idempotência: já estavam completed
-    falhas: int = Field(default=0)
-    custo_total: float = Field(default=0.0)
-    erro: str = ""
-    avisos: str = Field(default="[]", sa_column=Column(Text))  # lista JSON
-    started_at: datetime = Field(default_factory=brt_now)
-    finished_at: Optional[datetime] = None
-
-
-class PriorizacaoRun(SQLModel, table=True):
-    """Execução do processo de priorização (+ approach opcional), mesmo
-    template de EnrichmentRun — alimenta o painel de status de /priorizacao."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    user_email: str = Field(default="", index=True)  # cota mensal por usuário
-    search_run_id: int = Field(foreign_key="searchrun.id", index=True)
-    status: str = "running"  # running | done | error
-    incluiu_approach: bool = Field(default=False)
-    total_leads: int = Field(default=0)
-    processados: int = Field(default=0)
-    puladas: int = Field(default=0)  # já tinham priorizacao_status == "done" (idempotência)
-    falhas: int = Field(default=0)
-    erro: str = ""
-    avisos: str = Field(default="[]", sa_column=Column(Text))  # lista JSON
-    started_at: datetime = Field(default_factory=brt_now)
-    finished_at: Optional[datetime] = None
-
-
-class KipflowUsage(SQLModel, table=True):
-    """Custo cobrado pela API da KipFlow, por requisição (fonte do indicador de
-    custo no God Mode — mesmo papel que TokenUsage cumpre para os modelos de IA).
-    A KipFlow cobra por dataset/registro retornado e devolve o valor em `cost`."""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    endpoint: str  # ex.: "companies/batch/cnpj", "social/personas"
-    cost: float = Field(default=0.0)  # em BRL, como veio no campo `cost` da resposta
-    created_at: datetime = Field(default_factory=brt_now)
-
-class HunterAccount(SQLModel, table=True):
-    """Uma das contas da Hunter.io entre as quais a busca de e-mail é balanceada.
-
-    O Hunter vende créditos por CONTA, e o plano gratuito dá poucos por ciclo.
-    Para ampliar a cota sem plano pago, a plataforma aceita até
-    `HUNTER_MAX_CONTAS` contas e distribui as buscas entre elas
-    (`services/hunter_client.Balanceador`): o orçamento do ciclo passa a ser
-    créditos por conta x contas configuradas.
-
-    Tabela de configuração, como `IntegrationSetting` e `AgentModelSetting`:
-    não tem `tenant_id` porque é a credencial da organização inteira, não de um
-    cliente. `slot` (1..8) é a identidade estável da conta — é ele que
-    `HunterUsage.account_slot` referencia, e por isso apagar a linha de um slot
-    NÃO apaga o histórico de consumo dela.
-
-    A chave fica CIFRADA (Fernet, services/crypto.py) e nunca é lida de volta
-    para um campo de State: a UI vê apenas se o slot está configurado.
-    """
-    id: Optional[int] = Field(default=None, primary_key=True)
-    slot: int = Field(index=True, unique=True)  # 1..HUNTER_MAX_CONTAS
-    api_key_enc: str = Field(default="", sa_column=Column(Text))
-    created_at: datetime = Field(default_factory=brt_now)
-    updated_at: datetime = Field(default_factory=brt_now)
-
-
-class HunterUsage(SQLModel, table=True):
-    """Consumo da API Hunter.io na busca de e-mail dos contatos decisores.
-
-    Mesmo papel que `KipflowUsage` cumpre para a KipFlow, com uma diferença que
-    é do próprio fornecedor: o Hunter NÃO cobra em dinheiro por chamada, cobra
-    em CRÉDITOS de um pacote mensal, e a documentação é explícita em que uma
-    busca sem resultado não consome crédito. Por isso há duas colunas:
-
-    - toda tentativa vira uma linha (com `encontrado` True/False), para o painel
-      mostrar a taxa de acerto real;
-    - `creditos` é 1 só quando veio e-mail, e é ele que alimenta o card, o
-      gráfico e — principalmente — o gate da cota do ciclo.
-
-    Somar linhas em vez de créditos superestimaria o consumo e faria a
-    plataforma se auto-bloquear antes da hora.
-    """
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tenant_id: int = Field(foreign_key="tenant.id", index=True)
-    # Nulo quando o contato foi apagado depois; o consumo permanece no histórico.
-    contact_id: Optional[int] = Field(default=None, index=True)
-    dominio: str = Field(default="")
-    encontrado: bool = Field(default=False)
-    creditos: int = Field(default=0)
-    # Slot da conta que pagou o crédito (HunterAccount.slot). Sem ele o
-    # balanceamento seria cego: o teto é POR CONTA, então a soma global não diz
-    # se ainda cabe uma busca na conta escolhida. Não é FK de propósito — a
-    # linha do slot pode ser removida quando a conta é cancelada, e o consumo
-    # já feito continua contando no ciclo.
-    account_slot: int = Field(default=1, index=True)
-    created_at: datetime = Field(default_factory=brt_now, index=True)
-
-
 class ChatMessage(SQLModel, table=True):
     """Memória da conversa do agente de Insights IA (`/insights-ia`).
 
@@ -407,12 +130,18 @@ class AgentModelSetting(SQLModel, table=True):
 
 
 class IntegrationSetting(SQLModel, table=True):
-    """Linha única com as integrações de conta (e-mail e KipFlow), editável pelo
-    super admin em `/admin`. Segredos ficam CRIPTOGRAFADOS (Fernet, ver
+    """Linha única com a CREDENCIAL da Microsoft Graph, editável pelo super
+    admin em `/admin`. Segredos ficam CRIPTOGRAFADOS (Fernet, ver
     services/crypto.py) — nunca em texto puro, e nunca lidos de volta para um
     campo de State (State é serializado para o browser). A conexão do banco
     (DATABASE_URL) fica de fora de propósito: não pode depender de uma
     configuração guardada no próprio banco que ainda não se sabe acessar.
+
+    Só credencial e conexão moram aqui. A configuração OPERACIONAL do Agente 1
+    (horários das rodadas, janela de urgência, mapa de pastas) fica em
+    `ClassificacaoConfig` e `PastaClasse`: ela é editada pelo usuário PADRÃO, é
+    por tenant, e a UI precisa lê-la de volta — três coisas que esta tabela não
+    faz, já que ela não tem `tenant_id` e é toda serializada como booleano.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
 
@@ -427,25 +156,202 @@ class IntegrationSetting(SQLModel, table=True):
     graph_client_id: str = ""
     graph_client_secret_enc: str = Field(default="", sa_column=Column(Text))
 
-    kipflow_api_key_enc: str = Field(default="", sa_column=Column(Text))
-    kipflow_base_url: str = "https://api.kipflow.io"
+    # Pasta de ORIGEM da varredura: o nome bem-conhecido `inbox` resolve a Caixa
+    # de Entrada em qualquer idioma do locatário, o que um `displayName` não faz
+    # (numa caixa em português ela se chama "Caixa de Entrada"). Aceita também o
+    # id de uma pasta específica, para quem varre outra coisa que não a entrada.
+    # É nível de CONEXÃO, por isso mora aqui e não na configuração operacional.
+    graph_pasta_origem: str = "inbox"
 
-    # --- Hunter.io: e-mail dos contatos decisores ---
-    # As CHAVES não ficam aqui: são várias, uma por conta, em `HunterAccount`.
-    # O que sobra nesta linha é o que vale para todas elas.
-    #
-    # Teto de créditos por ciclo DE CADA CONTA. 50 é o plano gratuito do
-    # Hunter; fica configurável porque a conta paga muda esse número, e o gate
-    # da aplicação não pode exigir deploy para acompanhar. O orçamento total do
-    # ciclo é este valor multiplicado pelas contas configuradas.
-    hunter_creditos_mensais: int = Field(default=50)
-    # Dia do mês em que o Hunter renova os créditos: é o aniversário da
-    # ASSINATURA, não o dia 1º. Contar por mês civil daria uma janela deslocada
-    # do ciclo real e a plataforma bloquearia (ou liberaria) na hora errada.
-    # Dia maior que o mês comporta (31 em fevereiro) cai no último dia dele,
-    # tratado em `hunter_client.inicio_do_ciclo`. Vale para TODAS as contas: o
-    # operador cria as contas no mesmo dia justamente para não ter oito janelas
-    # diferentes para acompanhar.
-    hunter_dia_renovacao: int = Field(default=1)
+    updated_at: datetime = Field(default_factory=brt_now)
 
+
+# ===========================================================================
+# Agente de Suporte ao Comercial — e-mails classificados
+# ===========================================================================
+
+
+class ClassificacaoRun(SQLModel, table=True):
+    """Cabeçalho de uma execução do Agente 1, manual ou agendada.
+
+    Mesmo molde das antigas SearchRun/EnrichmentRun/PriorizacaoRun: cria-se a
+    linha como `running` ANTES do trabalho, atualizam-se os contadores em
+    sessões curtas a cada evento de progresso (é o que faz o progresso
+    sobreviver a um reload de página) e fecha-se com `done` ou `error`.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id", index=True)
+
+    # Vazio quando a rodada é agendada: não há usuário por trás dela. Indexado
+    # porque é a chave de qualquer contagem por usuário.
+    user_email: str = Field(default="", index=True)
+    origem: str = Field(default="manual", index=True)  # manual | agendado
+    slot: str = Field(default="")  # "" | h1 | h2 — qual horário disparou
+
+    status: str = Field(default="running", index=True)  # running | done | error
+
+    total_emails: int = 0      # lidos do Graph na janela
+    processados: int = 0       # efetivamente enviados ao modelo
+    classificados: int = 0     # caíram numa das 4 classes
+    ignorados: int = 0         # não se encaixaram em nenhuma
+    urgentes: int = 0
+    resumidos: int = 0
+    puladas: int = 0           # já estavam no banco: idempotência, custo zero
+    falhas: int = 0
+
+    erro: str = Field(default="", sa_column=Column(Text))
+    avisos: str = Field(default="[]", sa_column=Column(Text))  # lista JSON
+
+    started_at: datetime = Field(default_factory=brt_now, index=True)
+    finished_at: Optional[datetime] = None
+
+    # MATERIALIZADO, embora derivável dos dois timestamps acima. Com a coluna, o
+    # card de duração média do dashboard é um AVG() direto; sem ela, seria uma
+    # subtração de timestamps anuláveis linha a linha, em Python, toda vez que
+    # a página carrega.
+    duracao_segundos: Optional[int] = Field(default=None, index=True)
+
+
+class EmailClassificado(SQLModel, table=True):
+    """Um e-mail visto pelo Agente 1, tenha ele se encaixado numa classe ou não.
+
+    Duas decisões aqui definem o comportamento do produto e são fáceis de errar:
+
+    1. A identidade é o `internet_message_id`, NÃO o id do Graph. O id de uma
+       mensagem MUDA quando ela é movida de pasta, e mover é exatamente o que
+       este agente faz toda rodada. Se a deduplicação dependesse do id, a
+       segunda execução reclassificaria (e recobraria) tudo o que a primeira
+       moveu. O `internetMessageId` (RFC 5322) é imutável.
+
+    2. E-mail que não se encaixa em nenhuma das 4 classes TAMBÉM vira linha,
+       com `status="ignorado"` e `classe=""`. Sem essa linha, a rodada seguinte
+       mandaria o mesmo e-mail ao modelo de novo, pagando de novo. Ele não é
+       marcado, não é movido, e não aparece na tabela do dashboard.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "internet_message_id", name="uq_email_tenant_imid"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id", index=True)
+
+    internet_message_id: str = Field(index=True, max_length=998)
+    # Último id conhecido no Graph, reescrito com o que o POST /move devolve.
+    # Serve para o PATCH/move seguinte, nunca para deduplicar.
+    graph_message_id: str = Field(default="", sa_column=Column(Text))
+    graph_conversation_id: str = Field(default="", index=True)
+    graph_web_link: str = Field(default="", sa_column=Column(Text))
+
+    remetente_email: str = Field(default="", index=True)  # o "cliente" das consultas
+    remetente_nome: str = Field(default="")
+    assunto: str = Field(default="", sa_column=Column(Text))
+    # Corpo em texto puro e truncado: limita o custo em tokens e a superfície de
+    # injeção de prompt. É o insumo do Agente 2 e da busca do Agente 3.
+    corpo_texto: str = Field(default="", sa_column=Column(Text))
+    recebido_em: datetime = Field(index=True)
+
+    classe: str = Field(default="", index=True)  # "" = nenhuma das 4
+    urgente: bool = Field(default=False, index=True)
+    # Prazo estimado pelo modelo, em horas, guardado SEPARADO do booleano. Com
+    # ele na linha, mudar a janela de urgência de 24h para 8h re-marca todos os
+    # e-mails já gravados com um UPDATE, a custo zero de token. Só com o
+    # booleano, mudar a janela exigiria reprocessar tudo no modelo.
+    urgencia_prazo_horas: Optional[int] = None
+    confianca: int = Field(default=0)  # 0-100
+    justificativa: str = Field(default="", sa_column=Column(Text))
+
+    # pending | classificado | ignorado | falhou
+    status: str = Field(default="pending", index=True)
+    # Dois booleanos e não um: a rodada pode falhar ENTRE aplicar a categoria e
+    # mover. Separados, a rodada seguinte termina o serviço sem reinvocar o
+    # modelo; juntos, não haveria como saber onde parou.
+    categoria_aplicada: bool = Field(default=False)
+    movido: bool = Field(default=False)
+    pasta_destino_id: str = Field(default="")
+    erro: str = Field(default="", sa_column=Column(Text))
+
+    run_id: Optional[int] = Field(default=None, foreign_key="classificacaorun.id", index=True)
+    classificado_em: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=brt_now)
+
+
+class ResumoEmail(SQLModel, table=True):
+    """Resumo gerado pelo Agente 2 para um e-mail já classificado.
+
+    `email_id` é UNIQUE: a relação é um para um, e o "já resumido, pula" do
+    Agente 2 passa a ser uma checagem de existência garantida pelo banco, não
+    pela disciplina do código.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id", index=True)
+    email_id: int = Field(foreign_key="emailclassificado.id", index=True, unique=True)
+
+    resumo: str = Field(default="", sa_column=Column(Text))
+    pontos_chave: str = Field(default="[]", sa_column=Column(Text))  # lista JSON
+    acao_sugerida: str = Field(default="", sa_column=Column(Text))
+    prazo_mencionado: str = Field(default="")
+
+    status: str = Field(default="pending", index=True)  # pending | done | failed
+    erro: str = Field(default="", sa_column=Column(Text))
+    # Modelo que gerou, em snapshot: trocar o modelo em /admin depois não
+    # reescreve a procedência do que já foi gerado.
+    modelo: str = Field(default="")
+    gerado_em: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=brt_now)
+
+
+class ClassificacaoConfig(SQLModel, table=True):
+    """Configuração OPERACIONAL do Agente 1, uma linha por organização.
+
+    Editável pelo usuário padrão no `/dashboard`, ao contrário de
+    `IntegrationSetting`, que é credencial e é do super admin.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id", index=True, unique=True)
+
+    # "HH:MM" em horário de Brasília. String e não `time` porque é byte a byte o
+    # que o `rx.input(type="time")` emite e consome, e esta versão do Reflex não
+    # gera setters automáticos: cada conversão a mais seria mais um setter
+    # escrito à mão. Com zero à esquerda, a comparação lexicográfica já basta
+    # para decidir qual horário está vencido.
+    horario_1: str = Field(default="08:00")
+    horario_2: str = Field(default="16:00")
+
+    janela_urgencia_horas: int = Field(default=24)
+    lookback_horas: int = Field(default=48)            # janela de leitura no Graph
+    max_emails_por_execucao: int = Field(default=200)  # o teto de custo da rodada
+
+    ativo: bool = Field(default=True)
+    # Marca do último disparo AGENDADO, para o mesmo horário não rodar duas
+    # vezes no mesmo dia.
+    ultima_execucao_agendada: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=brt_now)
+
+
+class PastaClasse(SQLModel, table=True):
+    """Mapa classe -> pasta do Outlook. O usuário informa o NOME; o backend
+    resolve o id pelo Graph e o guarda aqui.
+
+    Uma linha por classe, e não quatro pares de colunas em `ClassificacaoConfig`:
+    acrescentar uma quinta classe vira um INSERT, não uma migration, e a UI vira
+    um `foreach`. Mesmo precedente das contas por slot que existiam antes.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "classe", name="uq_pasta_tenant_classe"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id", index=True)
+    classe: str = Field(index=True)
+
+    pasta_nome: str = Field(default="")     # o que o usuário digitou
+    pasta_caminho: str = Field(default="")  # "Caixa de Entrada/Pedidos", para exibir
+    pasta_id: str = Field(default="", sa_column=Column(Text))  # resolvido pelo Graph
+    resolvido_em: Optional[datetime] = None
+    erro_resolucao: str = Field(default="")
     updated_at: datetime = Field(default_factory=brt_now)
