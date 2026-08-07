@@ -36,6 +36,12 @@ cryptography>=42.0.0
 # transacionais — ver services/graph_mailer.py). Substituiu o SMTP.
 msal>=1.28.0
 
+# Agendador em processo das duas execuções diárias da classificação. Sobe pelo
+# lifespan do ASGI (`app.register_lifespan_task`), e não em tempo de import, o
+# que é o que impede um `reflex compile` ou um `db makemigrations` de levantar
+# agendador sem querer: os dois importam o módulo, mas não servem requisição.
+APScheduler>=3.10
+
 # --- Testes ---
 # `respx` mocka o httpx, que é o transporte do services/graph_client.py. Ele é
 # o que permite testar a leitura da caixa sem tocar em caixa nenhuma: ver a

@@ -30,12 +30,22 @@ from sales_support_agent.pages import (  # noqa: F401
 from sales_support_agent.pages.admin_dashboard import admin_dashboard
 from sales_support_agent.pages.auth import auth_page
 from sales_support_agent.pages.landing import landing_page
+from sales_support_agent.services.agendador import iniciar as iniciar_agendador
 from sales_support_agent.state import AdminState, SettingsState
 from sales_support_agent.styles.theme import BASE_STYLE
 
 # O tema (claro, fixo) fica no `RadixThemesPlugin` em `rxconfig.py` — passá-lo
 # aqui como `theme=` está deprecado desde a 0.9.
 app = rx.App(style=BASE_STYLE)
+
+# Agendador das duas execuções diárias da classificação.
+#
+# Registrado como LIFESPAN TASK, e não chamado em tempo de import. A diferença
+# é o que impede um `reflex compile` ou um `reflex db makemigrations` de subir
+# um agendador sem querer: os dois importam este módulo, mas não servem
+# requisição, então o lifespan do ASGI não roda. Também é o que faz o granian,
+# que roda em processo filho, levantar apenas um agendador.
+app.register_lifespan_task(iniciar_agendador)
 
 app.add_page(landing_page, route="/", title="Coester | Plataforma de Prospecção")
 app.add_page(auth_page, route="/login", title="Acessar | Coester")
