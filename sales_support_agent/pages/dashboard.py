@@ -185,8 +185,7 @@ def _pastas() -> rx.Component:
             DashboardState.pastas_pendentes,
             rx.callout(
                 "Enquanto houver classe sem pasta vinculada, a classificação não "
-                "roda. É proposital: começar e parar no meio deixaria parte dos "
-                "e-mails arquivada e parte na caixa de entrada.",
+                "roda.",
                 icon="triangle-alert", color_scheme="amber",
                 width="100%", margin_bottom="1rem",
             ),
@@ -204,7 +203,7 @@ def _pastas() -> rx.Component:
                 variant="soft", cursor="pointer", size="2",
             ),
             rx.text(
-                "Informe o nome da pasta; o sistema descobre o identificador dela.",
+                "Informe o nome da pasta e o sistema descobre o identificador dela.",
                 size="1", color=colors.TEXT_SEC, font_family=BODY_FONT,
             ),
             spacing="3", align_items="center", margin_top="1rem",
@@ -446,7 +445,7 @@ def dashboard_page() -> rx.Component:
                 color=colors.TEXT_MAIN, font_family=HEADING_FONT,
             ),
             rx.text(
-                "Acompanhe aqui a classificação dos e-mails da caixa comercial.",
+                "Acompanhe aqui a classificação dos e-mails da conta consulta@coester.com.br.",
                 color=colors.TEXT_SEC, font_family=BODY_FONT, margin_bottom="1.5rem",
             ),
             _metricas(),

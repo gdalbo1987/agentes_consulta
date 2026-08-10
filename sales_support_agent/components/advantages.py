@@ -32,7 +32,7 @@ def advantages() -> rx.Component:
         ("siren", "Detecção de urgência", "Marca o que pede entrega ou resposta dentro do prazo que você definir."),
         ("folder-tree", "Arquivamento na pasta certa", "Move a mensagem para a pasta da classe dela, direto no Outlook."),
         ("file-text", "Resumo pronto para ler", "Diz o que o cliente quer e qual o próximo passo, sem abrir o e-mail."),
-        ("sparkles", "Consulta em conversa", "Pergunte o que está urgente ou o que chegou de um cliente, em português."),
+        ("sparkles", "Consulta em conversa", "Pergunte o que está urgente ou o que chegou de um cliente."),
         ("clock", "Economia de tempo", "Duas execuções por dia, sem ninguém precisar lembrar de rodar nada."),
     ]
     
@@ -40,7 +40,7 @@ def advantages() -> rx.Component:
         rx.center(
             rx.vstack(
                 rx.heading("Muito mais do que uma caixa de entrada organizada.", font_family=HEADING_FONT, font_weight="900", size="8", color=colors.TEXT_MAIN),
-                rx.text("Três agentes de IA que leem, classificam e resumem os e-mails do comercial, para o time gastar o dia respondendo e não triando.", font_family=BODY_FONT, color=colors.TEXT_SEC, size="4", text_align="center", max_width="600px"),
+                rx.text("Três agentes de IA que leem, classificam e resumem os e-mails do comercial, para o time gastar o dia respondendo e não em triagem.", font_family=BODY_FONT, color=colors.TEXT_SEC, size="4", text_align="center", max_width="600px"),
                 spacing="4",
                 align_items="center",
                 margin_bottom="4rem"

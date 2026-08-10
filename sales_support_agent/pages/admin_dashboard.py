@@ -343,9 +343,7 @@ def _graph_card() -> rx.Component:
         rx.text(
             "O registro de aplicativo precisa de DUAS permissões de APLICAÇÃO, "
             "com consentimento do administrador: \"Mail.Send\" para enviar "
-            "convites e \"Mail.ReadWrite\" para ler, marcar e mover e-mails. O "
-            "remetente precisa ser uma caixa real do locatário: conta pessoal "
-            "(hotmail.com, outlook.com) não funciona no fluxo de aplicação.",
+            "convites e \"Mail.ReadWrite\" para ler, marcar e mover e-mails.",
             size="1", color=colors.TEXT_SEC,
         ),
         rx.hstack(

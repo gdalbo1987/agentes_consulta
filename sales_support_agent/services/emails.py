@@ -44,7 +44,7 @@ def _branded_wrapper(inner_html: str, cta_label: str, cta_href: str) -> str:
 
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 40px 0 20px 0;">
             <p style="color: #9ca3af; font-size: 12px; line-height: 1.6;">
-              Se você tiver alguma dúvida ou precisar de ajuda, basta responder a este e-mail.<br>
+              Se você tiver alguma dúvida ou precisar de ajuda, consulte o setor de <a href="mailto:inovacao@coester.com" style="color: #9ca3af; text-decoration: underline;">Inovação</a>.<br>
               © {ano} Coester. Todos os direitos reservados.
             </p>
           </div>
@@ -86,7 +86,7 @@ def send_invite_email(to_email: str, user_name: str, reset_link: str) -> None:
     inner = f"""
         <h2 style="color: #111827; font-size: 26px; margin: 0 0 10px 0;">Bem-vindo(a), {first_name}!</h2>
         <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
-            Você foi convidado(a) para acessar a plataforma interna de prospecção da Coester.
+            Você foi convidado(a) para acessar a plataforma de classificação de mensagens do comercial.
         </p>
         <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin: 0 0 32px 0;">
             Para começar, defina a sua senha de acesso clicando no botão abaixo.
@@ -96,7 +96,7 @@ def send_invite_email(to_email: str, user_name: str, reset_link: str) -> None:
     html = _branded_wrapper(inner, "Definir minha senha", reset_link)
     _send_html_email(
         to_email,
-        "Seu acesso à plataforma Coester: defina sua senha",
+        "Seu acesso à plataforma: defina sua senha",
         html,
     )
 
@@ -137,4 +137,4 @@ def montar_email_de_teste() -> tuple:
         </p>
     """
     html = _branded_wrapper(inner, "Abrir a plataforma", os.environ.get("APP_BASE_URL", "http://localhost:3000"))
-    return "Teste de envio da Plataforma Coester", html, _LOGO_PATH
+    return "Teste de envio das Plataformas Coester", html, _LOGO_PATH
