@@ -42,7 +42,7 @@ def hero() -> rx.Component:
         # 2. Conteúdo sobreposto (Texto e Botões)
         rx.vstack(
             rx.heading(
-                "Agente de Suporte ao Comercial",
+                "Agentes de IA de Suporte ao Comercial",
                 font_family=HEADING_FONT,
                 font_weight="900", 
                 size="9", 

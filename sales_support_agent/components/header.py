@@ -24,7 +24,7 @@ def header() -> rx.Component:
         ),
         
         # CTA (Você pode alterar o href deste botão futuramente para a tela de Login/App)
-        gradient_button("Acessar Plataforma", href="/login"),
+        gradient_button("Acessar Agentes", href="/login"),
         
         width="100%",
         height="80px",
