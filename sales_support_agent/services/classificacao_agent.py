@@ -93,7 +93,7 @@ Escolha EXATAMENTE UMA classe:
 Regras de decisão:
 
 1. A diferença entre "pedido" e "revisao_pedido" é existir um pedido anterior
-   sendo tratado. O mesmo vale para proposta e revisao_proposta.
+   sendo tratado. O mesmo vale para proposta e revisao_proposta. 
 2. Na dúvida entre uma das quatro e "nenhuma", escolha "nenhuma". E-mail
    classificado errado é movido para a pasta errada e some da caixa de entrada
    do time; e-mail deixado como "nenhuma" apenas continua onde está.

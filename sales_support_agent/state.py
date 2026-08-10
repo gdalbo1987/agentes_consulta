@@ -956,6 +956,23 @@ class ConsultaState(AppState):
         from sales_support_agent.models import TokenUsage
         from sales_support_agent.services.consulta_agent import stream_resposta
 
+        def _gravar_consumo(usage):
+            """O turno gastou, então o turno é cobrado.
+
+            Vale também para o turno que terminou em erro: um guardrail que
+            bloqueia já consumiu as suas chamadas, e não gravar aqui faria esse
+            gasto sumir do custo em `/admin`.
+            """
+            if not (usage["input"] or usage["output"]):
+                return
+            with rx.session() as session:
+                session.add(TokenUsage(
+                    tenant_id=tenant_id, agent_name="consulta_agent",
+                    model=modelo_do_agente("consulta_agent"),
+                    input_tokens=usage["input"], output_tokens=usage["output"],
+                ))
+                session.commit()
+
         texto_atual = ""
         async for event in stream_resposta(tenant_id, user_email, pergunta):
             kind = event[0]
@@ -972,14 +989,7 @@ class ConsultaState(AppState):
 
             elif kind == "done":
                 _, texto, usage = event
-                if usage["input"] or usage["output"]:
-                    with rx.session() as session:
-                        session.add(TokenUsage(
-                            tenant_id=tenant_id, agent_name="consulta_agent",
-                            model=modelo_do_agente("consulta_agent"),
-                            input_tokens=usage["input"], output_tokens=usage["output"],
-                        ))
-                        session.commit()
+                _gravar_consumo(usage)
                 async with self:
                     self.messages = self.messages[:-1] + [
                         ChatMessageUI(role="assistant", content=texto)
@@ -987,7 +997,8 @@ class ConsultaState(AppState):
                 yield rx.scroll_to("chat-anchor", align_to_top=False)
 
             elif kind == "error":
-                _, msg = event
+                _, msg, usage = event
+                _gravar_consumo(usage)
                 async with self:
                     # Remove o placeholder vazio do assistente — só a pergunta
                     # do usuário e o erro ficam visíveis.
