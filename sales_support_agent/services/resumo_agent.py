@@ -57,7 +57,21 @@ que vai bater o olho na lista e decidir o que atender primeiro.
   valores devem aparecer, porque é isso que evita abrir o e-mail.
 - `pontos_chave`: de 2 a 5 itens curtos, cada um uma informação concreta. Nada de
   frases genéricas do tipo "cliente entrou em contato".
-- `acao_sugerida`: UMA frase dizendo o próximo passo prático.
+- `acao_sugerida`: o próximo passo, escrito PARA A EQUIPE DE ELABORAÇÃO E
+  REVISÃO DE PROPOSTAS E PEDIDOS. Quem lê é essa equipe, e a frase precisa
+  descrever o que ELA faz: elaborar ou revisar a proposta, montar ou corrigir
+  o orçamento, abrir o pedido, atualizar quantidade, prazo ou escopo, responder
+  a cotação, recalcular preço, enviar a nova versão ao cliente.
+
+  Quando o e-mail também exigir algo de OUTRA equipe (financeiro, logística,
+  expedição, engenharia, qualidade, jurídico), isso é SECUNDÁRIO: escreva a
+  ação da equipe de propostas e pedidos primeiro e cite a outra depois, numa
+  oração curta começando por "e acionar", "e encaminhar para" ou equivalente.
+  Nunca comece a frase pela atividade de outra equipe.
+
+  Se o e-mail não pedir nada da equipe de propostas e pedidos, e for só
+  encaminhamento para outra área, diga isso de forma direta em vez de inventar
+  uma tarefa comercial. Uma frase, no máximo duas.
 - `prazo_mencionado`: o prazo como o e-mail o escreveu ("até sexta", "15 dias",
   "urgente para hoje"). String vazia se o e-mail não menciona prazo nenhum.
 

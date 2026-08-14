@@ -5,9 +5,20 @@ deliberado: com duas implementações, o chat poderia dizer "12 e-mails urgentes
 enquanto a tabela na tela mostra 9, e não haveria como saber qual está certa.
 Uma fonte só torna a divergência impossível.
 
-Tudo aqui é somente leitura e devolve dicionários ACHATADOS. Achatados porque o
-`foreach` do Reflex não acessa dicionário aninhado tipado, e porque as tools do
-agente serializam o retorno para JSON.
+As consultas devolvem dicionários ACHATADOS. Achatados porque o `foreach` do
+Reflex não acessa dicionário aninhado tipado, e porque as tools do agente
+serializam o retorno para JSON.
+
+ATENÇÃO AO NOME DO MÓDULO. Ele era só de leitura, e hoje tem DUAS funções de
+escrita, no fim do arquivo: `marcar_urgencia_tratada` e `excluir_email`. Elas
+vivem aqui porque mexem no mesmo modelo que alimenta o painel, e separá-las num
+módulo novo só espalharia a mesma responsabilidade.
+
+Isso NÃO afrouxa a garantia do Agente 3. Ele continua somente leitura por
+construção: `consulta_agent._construir_funcoes` monta uma a uma as funções que
+viram tool, e nenhuma das duas está na lista. Quem for acrescentar tool nova
+precisa manter isso, porque é a defesa estrutural contra injeção vinda do
+conteúdo dos e-mails. Há um teste que falha se uma tool de escrita aparecer.
 """
 
 import json
@@ -47,6 +58,13 @@ def _achatar(email: EmailClassificado, resumo: Optional[ResumoEmail] = None) -> 
         "classe": email.classe,
         "classe_label": rotulo(email.classe),
         "urgente": bool(email.urgente),
+        "importante": bool(email.importante),
+        "urgencia_tratada": email.urgencia_tratada_em is not None,
+        # Rótulo pronto para a tela e para o chat: as duas faixas são
+        # mutuamente exclusivas, então uma palavra só descreve a linha.
+        "prioridade": (
+            "Urgente" if email.urgente else ("Importante" if email.importante else "Normal")
+        ),
         "urgencia_prazo_horas": email.urgencia_prazo_horas,
         "web_link": email.graph_web_link or "",
     }
@@ -122,6 +140,50 @@ def metricas_execucao(tenant_id: int) -> dict:
         "ultima_rodada_origem": ultima.origem if ultima else "",
         "em_andamento": em_andamento is not None,
     }
+
+
+def progresso_execucao(tenant_id: int) -> dict:
+    """Andamento da rodada, lido do BANCO e não do State do navegador.
+
+    É o que permite a barra de progresso funcionar para a execução AGENDADA,
+    que roda noutro processo e nunca tocou o State de ninguém. Devolve também a
+    identidade da última rodada concluída, para a tela saber que ela ACABOU de
+    terminar e mostrar o aviso de concluído uma vez só.
+    """
+    with rx.session() as session:
+        emandamento = (
+            session.query(ClassificacaoRun)
+            .filter(
+                ClassificacaoRun.tenant_id == tenant_id,
+                ClassificacaoRun.status == "running",
+            )
+            .order_by(ClassificacaoRun.started_at.desc())
+            .first()
+        )
+        ultima = (
+            session.query(ClassificacaoRun)
+            .filter(
+                ClassificacaoRun.tenant_id == tenant_id,
+                ClassificacaoRun.status.in_(("done", "error")),
+            )
+            .order_by(ClassificacaoRun.id.desc())
+            .first()
+        )
+
+        return {
+            "em_andamento": emandamento is not None,
+            "run_id": emandamento.id if emandamento else 0,
+            "origem": emandamento.origem if emandamento else "",
+            "processados": emandamento.processados if emandamento else 0,
+            "total": emandamento.total_emails if emandamento else 0,
+            "ultima_run_id": ultima.id if ultima else 0,
+            "ultima_status": ultima.status if ultima else "",
+            "ultima_origem": ultima.origem if ultima else "",
+            "ultima_classificados": ultima.classificados if ultima else 0,
+            "ultima_ignorados": ultima.ignorados if ultima else 0,
+            "ultima_puladas": ultima.puladas if ultima else 0,
+            "ultima_erro": ultima.erro if ultima else "",
+        }
 
 
 def _duracao(segundos) -> str:
@@ -213,11 +275,17 @@ def detalhe_email(tenant_id: int, email_id: int) -> Optional[dict]:
 
 
 def urgencias(tenant_id: int, limite: int = 20) -> List[dict]:
-    """Os urgentes, mais recentes primeiro, já com o resumo. O painel do topo."""
+    """Os urgentes AINDA NÃO TRATADOS, mais recentes primeiro, já com o resumo.
+
+    O painel é uma FILA de trabalho, e não um relatório: o que já foi resolvido
+    sai dela. Quem foi tratado continua no banco, na tabela e no Outlook, com a
+    marcação de urgente intacta; some só daqui.
+    """
     with rx.session() as session:
         linhas = (
             _base(session, tenant_id)
             .filter(EmailClassificado.urgente.is_(True))
+            .filter(EmailClassificado.urgencia_tratada_em.is_(None))
             .order_by(EmailClassificado.recebido_em.desc())
             .limit(limite)
             .all()
@@ -243,6 +311,7 @@ def resumo_da_caixa(tenant_id: int) -> dict:
         base = _base(session, tenant_id)
         total = base.count()
         urgentes = base.filter(EmailClassificado.urgente.is_(True)).count()
+        importantes = base.filter(EmailClassificado.importante.is_(True)).count()
 
         por_classe = {}
         for classe in CLASSES:
@@ -260,6 +329,7 @@ def resumo_da_caixa(tenant_id: int) -> dict:
     return {
         "total": total,
         "urgentes": urgentes,
+        "importantes": importantes,
         "por_classe": {rotulo(c): n for c, n in por_classe.items()},
         "periodo_de": periodo[0].strftime("%d/%m/%Y") if periodo and periodo[0] else "-",
         "periodo_ate": periodo[1].strftime("%d/%m/%Y") if periodo and periodo[1] else "-",
@@ -362,24 +432,92 @@ def ultima_execucao(tenant_id: int) -> Optional[dict]:
 def recalcular_urgencia(tenant_id: int, janela_horas: int) -> int:
     """Re-marca os e-mails já gravados quando a janela de urgência muda.
 
-    É por isto que `urgencia_prazo_horas` fica guardado separado do booleano:
-    mudar a janela é um UPDATE, e não uma reclassificação da caixa inteira no
-    modelo. Devolve quantas linhas mudaram.
+    É por isto que `urgencia_prazo_horas` e `urgente_semantico` ficam guardados
+    separados dos booleanos: mudar a janela é um UPDATE, e não uma
+    reclassificação da caixa inteira no modelo. Devolve quantas linhas mudaram.
+
+    Re-marca as DUAS faixas. Estreitar a janela não apaga a prioridade de um
+    e-mail com data: ele deixa de ser urgente e passa a importante, porque o
+    compromisso continua existindo, só não é mais para agora.
     """
-    from sales_support_agent.services.classificacao_rules import calcular_urgencia
+    from sales_support_agent.services.classificacao_rules import calcular_prioridade
 
     alteradas = 0
     with rx.session() as session:
         for linha in _base(session, tenant_id).all():
-            # `urgente_semantico` não é persistido: quando não há prazo mas o
-            # e-mail está marcado como urgente, a marcação veio do sinal
-            # semântico e é preservada, porque a janela não a afeta.
-            if linha.urgencia_prazo_horas is None:
-                continue
-            novo = calcular_urgencia(linha.urgencia_prazo_horas, False, janela_horas)
-            if novo != linha.urgente:
-                linha.urgente = novo
+            urgente, importante = calcular_prioridade(
+                linha.urgencia_prazo_horas,
+                bool(linha.urgente_semantico),
+                janela_horas,
+            )
+            if urgente != linha.urgente or importante != linha.importante:
+                linha.urgente = urgente
+                linha.importante = importante
                 alteradas += 1
         if alteradas:
             session.commit()
     return alteradas
+
+
+# ---------------------------------------------------------------------------
+# Escrita: as duas únicas operações de gravação deste módulo
+# ---------------------------------------------------------------------------
+# Elas moram aqui, e não no State, porque mexem no mesmo modelo de leitura que
+# alimenta o painel E as tools do Agente 3. O agente continua SÓ LEITURA: ele
+# não recebe nenhuma destas funções, e nunca deve receber.
+
+
+def marcar_urgencia_tratada(tenant_id: int, email_id: int, tratada: bool = True) -> bool:
+    """Tira (ou devolve) um e-mail da fila de urgências, SEM apagá-lo.
+
+    Não mexe em `urgente`: aquilo é fato calculado a partir do prazo, e o
+    recálculo da janela o reescreveria, trazendo de volta o que já foi tratado.
+    Também não mexe no Outlook: a categoria `Urgente` continua na mensagem,
+    porque ela descreve o e-mail, não a fila de trabalho de quem o lê.
+    """
+    with rx.session() as session:
+        linha = (
+            session.query(EmailClassificado)
+            .filter(
+                EmailClassificado.tenant_id == tenant_id,
+                EmailClassificado.id == email_id,
+            )
+            .first()
+        )
+        if not linha:
+            return False
+        linha.urgencia_tratada_em = brt_now() if tratada else None
+        session.commit()
+        return True
+
+
+def excluir_email(tenant_id: int, email_id: int) -> dict:
+    """Apaga UM e-mail classificado e o resumo dele. Não toca no Outlook.
+
+    Devolve `{"apagado": bool, "assunto": str}` para o chamador montar a
+    mensagem sem precisar reabrir a linha.
+
+    O resumo sai ANTES do e-mail: ele referencia `emailclassificado.id` por
+    chave estrangeira, e na ordem inversa o PostgreSQL recusa e a transação
+    inteira reverte.
+    """
+    with rx.session() as session:
+        linha = (
+            session.query(EmailClassificado)
+            .filter(
+                EmailClassificado.tenant_id == tenant_id,
+                EmailClassificado.id == email_id,
+            )
+            .first()
+        )
+        if not linha:
+            return {"apagado": False, "assunto": ""}
+
+        assunto = linha.assunto or "(sem assunto)"
+        session.query(ResumoEmail).filter(ResumoEmail.email_id == linha.id).delete(
+            synchronize_session=False
+        )
+        session.flush()
+        session.delete(linha)
+        session.commit()
+        return {"apagado": True, "assunto": assunto}

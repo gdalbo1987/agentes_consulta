@@ -71,7 +71,8 @@ def test_dialogos_controlados_tem_setter_de_abertura():
     declarados = _setters_declarados()
 
     for campo in ("set_detalhe_aberto", "set_clear_dialog_open",
-                  "set_confirm_counters_open", "set_confirm_logs_open"):
+                  "set_confirm_counters_open", "set_confirm_logs_open",
+                  "set_confirm_zerar_open"):
         assert campo in declarados, f"falta {campo}"
 
 

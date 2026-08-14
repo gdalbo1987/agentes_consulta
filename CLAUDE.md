@@ -45,6 +45,15 @@ exige pedido explícito do usuário.
    `/dashboard`, mais o botão de execução manual. As duas compartilham o mesmo
    código.
 
+6. **O automático tem interruptor, e ele nasce DESLIGADO.**
+   `ClassificacaoConfig.ativo` é o botão "Iniciar"/"Parar" do `/dashboard`.
+   Configurar horário não é o mesmo que autorizar o agente a mexer na caixa, e
+   instalação nova não pode começar a arquivar e-mail sozinha só porque subiu.
+   O interruptor vale **apenas para `origem="agendado"`**: "Classificar agora" é
+   ação deliberada de quem está olhando a tela e precisa funcionar justamente
+   com o automático parado, que é como se confere a configuração antes de
+   soltar o agente. Quem inverter isso quebra o único jeito seguro de testar.
+
 A cota `CONSULTA_LIMIT_MENSAL = 20` sobreviveu em `state.py` mas está **órfã e
 sem uso**. Ela era 20 por usuário por etapa do funil antigo; numa classificação
 que roda duas vezes por dia, o mesmo número estouraria no dia 10. A quê ela
@@ -186,12 +195,65 @@ validação por igualdade falhava em silêncio e o resultado parecia falta de da
 `"nenhuma"` é valor do enum, e não ausência de resposta, para que "não se
 encaixa" seja decisão explícita.
 
-**A urgência não é decidida pelo modelo.** Ele estima `prazo_em_horas` e um
+**A prioridade não é decidida pelo modelo.** Ele estima `prazo_em_horas` e um
 sinal semântico; a comparação com a janela configurada é feita em Python
-(`classificacao_rules.calcular_urgencia`). Além de conta de data ser
+(`classificacao_rules.calcular_prioridade`). Além de conta de data ser
 determinística demais para delegar, é isso que permite mudar a janela de 24h
 para 8h com um UPDATE, sem reprocessar a caixa no modelo. Por isso
-`urgencia_prazo_horas` é persistido separado do booleano `urgente`.
+`urgencia_prazo_horas` e `urgente_semantico` são persistidos separados dos
+booleanos.
+
+São **três faixas, e não duas**, e elas são mutuamente exclusivas:
+
+| Faixa | Regra | Categoria no Outlook |
+|---|---|---|
+| Urgente | tem data e ela cai DENTRO da janela, ou sinal semântico sem data | `Urgente` |
+| Importante | tem data, mas ALÉM da janela | `Importante` |
+| Nenhuma | nem data nem sinal | (só a classe) |
+
+Ter data é compromisso assumido, mesmo distante. Com duas faixas só, um pedido
+com entrega marcada para daqui a duas semanas ficava indistinguível de um
+e-mail sem compromisso nenhum, e só reaparecia quando já era tarde. Estreitar a
+janela **rebaixa** de urgente para importante, e nunca apaga a prioridade.
+
+`urgente_semantico` precisa estar na linha porque, sem ele, o recálculo
+adivinhava pela ausência de prazo e não sabia distinguir "urgente porque a data
+cabe" de "urgente porque o texto diz". A migration que criou a coluna traz um
+backfill (`urgente AND prazo IS NULL -> semantico = true`) que reconstrói
+exatamente essa informação, e sem ele o primeiro recálculo desmarcaria em
+silêncio todo urgente sem prazo.
+
+**Todo e-mail classificado leva a categoria `Classificado por IA`**
+(`CATEGORIA_IA`), inclusive sem prioridade nenhuma. `scripts/aplicar_categoria_ia.py`
+aplica a marca retroativamente a quem foi classificado antes de ela existir, sem
+gastar token: a classe já está no banco e falta só o PATCH. Ele é seguro de
+repetir, porque `aplicar_categorias` manda a UNIÃO. É a marca de procedência:
+ela separa no Outlook o que o agente arquivou do que uma pessoa arquivou à mão,
+e é o que torna reversível uma execução mal calibrada, porque dá para achar tudo
+o que ele tocou com uma busca por categoria. E-mail `ignorado` **não** a recebe:
+ele não foi tocado, e dizer que foi seria mentira.
+
+**Tirar da fila de urgências não é desmarcar a urgência.** O botão do painel
+grava `urgencia_tratada_em`, e `urgencias()` filtra por ela. Fazer
+`urgente = False` seria mais simples e estaria errado: a urgência é recalculada
+a partir do prazo sempre que a janela muda, e o próximo recálculo traria de
+volta tudo o que já tinha sido resolvido. "Já cuidei disto" é decisão de uma
+pessoa e precisa sobreviver ao recálculo. A categoria `Urgente` no Outlook
+também não é removida: ela descreve o e-mail, não a fila de trabalho de quem o
+lê.
+
+**`services/emails_query.py` não é mais só leitura.** Ele ganhou
+`marcar_urgencia_tratada` e `excluir_email` para servir os botões do painel.
+Isso NÃO afrouxa a garantia do Agente 3, que recebe as tools uma a uma em
+`_construir_funcoes` e não recebe nenhuma das duas. Há dois testes de guarda: um
+compara por identidade de função (renomear não engana) e outro varre o corpo de
+cada tool atrás de `.delete(`, `.commit(` e `session.add(`.
+
+**O andamento da rodada é gravado na linha de `ClassificacaoRun` a cada
+e-mail** (`_marcar_progresso`). Sem isso, o progresso só existiria no State do
+navegador de quem clicou, e a execução agendada rodaria invisível. O painel
+sonda `emails_query.progresso_execucao`, e é por isso que a barra de progresso e
+o aviso de conclusão funcionam igual para as duas origens.
 
 **Contra injeção de prompt, a defesa principal é o `output_type`**, e não a
 instrução. O modelo não consegue emitir nada além de um rótulo do enum, um
@@ -205,6 +267,12 @@ principal, e não apenas mudando o formato.
 Roda na mesma execução, logo depois de uma classificação bem-sucedida, e nunca
 para e-mail ignorado. Falha dele **não desfaz** a classificação: o e-mail já foi
 movido, e o resumo pode ser gerado depois.
+
+`acao_sugerida` é escrita **para a equipe de elaboração e revisão de propostas e
+pedidos**, que é quem lê a tela. Atividade de outra área (financeiro,
+logística, engenharia) entra como oração secundária, nunca como início da frase.
+Sem essa regra o campo virava "abrir o CSV e preencher a coluna de prazo", que é
+tarefa de suprimentos, e a equipe que lê não reconhecia nada seu ali.
 
 ### Agente 3, consulta
 
@@ -226,6 +294,34 @@ Duas coisas importam mais que o prompt:
 O texto só é liberado para a tela depois do guardrail de saída E da checagem de
 fundamentação, e por isso o streaming é simulado. Emitir os deltas brutos do
 modelo tornaria as duas verificações decorativas.
+
+#### O SDK NÃO entrega ao guardrail a string que o usuário digitou
+
+Ele entrega a **lista de itens da conversa**
+(`[{"role": "user", "content": "..."}, ...]`), e com sessão ela carrega também
+os turnos anteriores. Repassar essa lista crua para o `Runner.run` do avaliador
+já quebrou o produto: o avaliador passava a ser ENDEREÇADO pelo texto em vez de
+julgá-lo, e julgava a conversa inteira em vez da pergunta nova. O sintoma era um
+veredito instável que barrava pergunta legítima ("Quais e-mails temos
+classificados?"), e o mesmo defeito barrava respostas corretas na saída.
+
+A forma certa é a de hoje: `_texto_do_input` reduz à última fala do usuário, e
+`_avaliar_escopo` embrulha o texto entre `<texto_a_avaliar>` e
+`</texto_a_avaliar>`. Isso também fecha um buraco de injeção, porque texto de
+e-mail ecoado numa resposta chegava ao avaliador como turno de conversa, ou
+seja, como instrução para ele.
+
+#### Os guardrails de escopo falham ABERTO, de propósito
+
+Erro do avaliador (rede, cota, schema) ou dúvida dele liberam a passagem.
+Fechar aqui não acrescenta segurança: as tools são somente de leitura e fechadas
+sobre o `tenant_id`, e `verificar_fundamentacao` já barra resposta sem lastro.
+Esta é a camada mais fraca das três, e fechá-la só faz uma falha de rede virar
+"não posso responder".
+
+Pela mesma razão o prompt do Agente 3 trata **saudação como conversa**, e não
+como consulta. Sem essa regra, "bom dia" caía na cláusula da fonte de verdade
+(nenhuma ferramenta trouxe dado) e era respondido com o fallback.
 
 ## Testes
 
@@ -323,6 +419,23 @@ duas pontas.
 `TokenUsage.model` é texto desnormalizado, e não uma chave estrangeira. É por
 isso que apagar linhas de `AgentModelSetting` (como `scripts/migrar_agentes.py`
 faz com as chaves aposentadas) não estraga o custo histórico.
+
+**Um turno da consulta são QUATRO chamadas ao modelo**, não uma: guardrail de
+entrada, decisão de ferramenta, resposta e guardrail de saída. Como cada
+guardrail é um `Runner.run` separado, com contador próprio, o consumo dele
+morreria ali; `_somar_usage` o joga no acumulador da execução principal, e por
+isso `_extract_usage` devolve o total do turno. Isso já custou uma
+subnotificação medida de 53% na SAÍDA, que é a mais afetada porque o veredito
+estruturado do avaliador é grande perto de uma resposta curta de chat.
+
+**Turno bloqueado também é cobrado.** O guardrail que barra já pagou pelas
+chamadas dele, então o evento `("error", msg, usage)` carrega consumo pelo mesmo
+motivo que o de sucesso. Quem mexer nesse contrato precisa manter o `usage` nos
+dois caminhos, ou o gasto some do custo em `/admin`.
+
+As linhas de `consulta_agent` gravadas antes dessa correção estão subnotificadas
+e ficaram como estão: reescrever histórico de custo seria pior que conviver com
+o degrau.
 
 Trocar `MODELOS_DISPONIVEIS` (em `services/settings.py`) exige um UPDATE nas
 linhas de `AgentModelSetting`, que o `ensure_*` nunca sobrescreve. Os preços não

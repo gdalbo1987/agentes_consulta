@@ -605,3 +605,38 @@ async def test_turno_bloqueado_ainda_reporta_o_que_gastou(monkeypatch):
     kind, msg, usage = eventos[0]
     assert kind == "error"
     assert usage == {"input": 1337, "output": 42}
+
+
+def test_as_funcoes_de_escrita_do_emails_query_nao_viram_tool():
+    """`emails_query` deixou de ser só leitura, e o agente NÃO pode segui-lo.
+
+    O módulo ganhou `marcar_urgencia_tratada` e `excluir_email` para servir os
+    botões do painel. O Agente 3 recebe as tools uma a uma, então basta não
+    incluí-las; este teste é o que faz alguém perceber se um dia incluir.
+
+    Comparar por identidade de função, e não por nome: renomear `excluir_email`
+    para `remover_registro` enganaria uma checagem de substring.
+    """
+    from sales_support_agent.services import emails_query
+
+    escritoras = {emails_query.marcar_urgencia_tratada, emails_query.excluir_email}
+    expostas = set(consulta_agent._construir_funcoes(TENANT).values())
+
+    assert not (escritoras & expostas), "uma função de escrita virou tool do agente"
+
+
+def test_o_agente_nao_expoe_nada_que_grave_no_banco():
+    """Varredura do corpo de cada tool atrás de escrita.
+
+    Mais forte que olhar o nome: pega a tool que chama `session.delete` ou
+    `session.commit` por dentro, com qualquer nome.
+    """
+    import inspect
+
+    for nome, funcao in consulta_agent._construir_funcoes(TENANT).items():
+        try:
+            fonte = inspect.getsource(funcao)
+        except (OSError, TypeError):  # pragma: no cover - closure sem fonte
+            continue
+        for proibido in (".delete(", ".commit(", "session.add("):
+            assert proibido not in fonte, f"a tool {nome} escreve no banco ({proibido})"

@@ -290,7 +290,7 @@ def test_busca_de_conteudo_olha_assunto_e_resumo(base):
 
 
 def test_apertar_a_janela_re_marca_sem_chamar_o_modelo(base):
-    """A razão de `urgencia_prazo_horas` ser persistido separado do booleano."""
+    """A razão de `urgencia_prazo_horas` ser persistido separado dos booleanos."""
     _email(base, assunto="Prazo 12h", imid="<1@t>", urgencia_prazo_horas=12, urgente=True)
     _email(base, assunto="Prazo 6h", imid="<2@t>", urgencia_prazo_horas=6, urgente=True)
 
@@ -301,6 +301,18 @@ def test_apertar_a_janela_re_marca_sem_chamar_o_modelo(base):
     assert urgentes == {"Prazo 6h"}
 
 
+def test_apertar_a_janela_rebaixa_para_importante_e_nao_apaga(base):
+    """Compromisso com data não vira "sem prioridade" só porque a janela mudou."""
+    _email(base, assunto="Prazo 12h", urgencia_prazo_horas=12, urgente=True)
+
+    emails_query.recalcular_urgencia(TENANT, janela_horas=8)
+
+    linha = emails_query.listar_emails(TENANT)[0]
+    assert linha["urgente"] is False
+    assert linha["importante"] is True
+    assert linha["prioridade"] == "Importante"
+
+
 def test_alargar_a_janela_volta_a_marcar(base):
     _email(base, assunto="Prazo 12h", urgencia_prazo_horas=12, urgente=False)
 
@@ -309,9 +321,134 @@ def test_alargar_a_janela_volta_a_marcar(base):
 
 
 def test_urgencia_sem_prazo_e_preservada(base):
-    """Ela veio do sinal semântico ("estamos parados"), que a janela não afeta."""
-    _email(base, assunto="Urgente sem prazo", urgencia_prazo_horas=None, urgente=True)
+    """Ela veio do sinal semântico ("estamos parados"), que a janela não afeta.
+
+    O sinal é PERSISTIDO: antes o recálculo o adivinhava pela ausência de
+    prazo, e não sabia distinguir "urgente porque a data cabe" de "urgente
+    porque o texto diz".
+    """
+    _email(
+        base, assunto="Urgente sem prazo", urgencia_prazo_horas=None,
+        urgente=True, urgente_semantico=True,
+    )
 
     emails_query.recalcular_urgencia(TENANT, janela_horas=1)
 
     assert len(emails_query.listar_emails(TENANT, apenas_urgentes=True)) == 1
+
+
+def test_sem_prazo_e_sem_sinal_semantico_nao_ganha_prioridade(base):
+    """Contraprova: sem os dois, o recálculo desmarca, e deve mesmo."""
+    _email(
+        base, assunto="Sem nada", urgencia_prazo_horas=None,
+        urgente=True, urgente_semantico=False,
+    )
+
+    emails_query.recalcular_urgencia(TENANT, janela_horas=24)
+
+    linha = emails_query.listar_emails(TENANT)[0]
+    assert linha["prioridade"] == "Normal"
+
+
+# ---------------------------------------------------------------------------
+# Fila de urgências: tratar tira da fila, não do banco
+# ---------------------------------------------------------------------------
+def test_tratar_tira_da_fila_de_urgencias_mas_nao_do_banco(base):
+    """A distinção que o botão do painel promete."""
+    eid = _email(base, assunto="Urgente", urgencia_prazo_horas=6, urgente=True)
+
+    assert len(emails_query.urgencias(TENANT)) == 1
+
+    assert emails_query.marcar_urgencia_tratada(TENANT, eid, True) is True
+
+    assert emails_query.urgencias(TENANT) == []
+    # Continua no banco, na tabela e com a marcação de urgente intacta.
+    linha = emails_query.listar_emails(TENANT)[0]
+    assert linha["id"] == eid
+    assert linha["urgente"] is True
+    assert linha["urgencia_tratada"] is True
+    assert len(emails_query.listar_emails(TENANT, apenas_urgentes=True)) == 1
+
+
+def test_tratado_sobrevive_ao_recalculo_da_janela(base):
+    """A razão de existir uma coluna própria em vez de `urgente = False`.
+
+    A urgência é recalculada a partir do prazo sempre que a janela muda. Se
+    tratar fosse desmarcar, o próximo recálculo traria de volta tudo o que já
+    tinha sido resolvido.
+    """
+    eid = _email(base, assunto="Urgente", urgencia_prazo_horas=6, urgente=True)
+    emails_query.marcar_urgencia_tratada(TENANT, eid, True)
+
+    emails_query.recalcular_urgencia(TENANT, janela_horas=48)
+
+    assert emails_query.urgencias(TENANT) == [], "o recálculo ressuscitou um tratado"
+
+
+def test_devolver_para_a_fila_desfaz(base):
+    """Tirar da fila é um clique só, sem confirmação, então precisa ter volta."""
+    eid = _email(base, assunto="Urgente", urgencia_prazo_horas=6, urgente=True)
+    emails_query.marcar_urgencia_tratada(TENANT, eid, True)
+
+    emails_query.marcar_urgencia_tratada(TENANT, eid, False)
+
+    assert len(emails_query.urgencias(TENANT)) == 1
+
+
+def test_tratar_email_inexistente_nao_explode(base):
+    assert emails_query.marcar_urgencia_tratada(TENANT, 99999, True) is False
+
+
+def test_tratar_nao_atravessa_organizacoes(base):
+    """O `tenant_id` entra no WHERE, e não só no dado lido."""
+    eid = _email(base, assunto="Urgente", urgencia_prazo_horas=6, urgente=True)
+
+    assert emails_query.marcar_urgencia_tratada(999, eid, True) is False
+    assert len(emails_query.urgencias(TENANT)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Exclusão de um e-mail
+# ---------------------------------------------------------------------------
+def test_excluir_apaga_o_email_e_o_resumo(base):
+    """O resumo referencia o e-mail por chave estrangeira e sai primeiro."""
+    from sqlmodel import Session
+
+    from sales_support_agent.models import EmailClassificado, ResumoEmail
+
+    eid = _email(base, assunto="Para apagar")
+    _resumo(base, eid, resumo="resumo qualquer")
+
+    resultado = emails_query.excluir_email(TENANT, eid)
+
+    assert resultado == {"apagado": True, "assunto": "Para apagar"}
+    with Session(base) as s:
+        assert s.get(EmailClassificado, eid) is None
+        assert s.query(ResumoEmail).filter(ResumoEmail.email_id == eid).count() == 0
+
+
+def test_excluir_nao_toca_nos_outros(base):
+    _email(base, assunto="Fica", imid="<fica@t>")
+    eid = _email(base, assunto="Sai", imid="<sai@t>")
+
+    emails_query.excluir_email(TENANT, eid)
+
+    assert {e["assunto"] for e in emails_query.listar_emails(TENANT)} == {"Fica"}
+
+
+def test_excluir_email_inexistente_devolve_nao_apagado(base):
+    assert emails_query.excluir_email(TENANT, 99999) == {"apagado": False, "assunto": ""}
+
+
+def test_excluir_nao_atravessa_organizacoes(base):
+    eid = _email(base, assunto="De outra org")
+
+    assert emails_query.excluir_email(999, eid)["apagado"] is False
+    assert len(emails_query.listar_emails(TENANT)) == 1
+
+
+def test_excluir_sem_resumo_funciona(base):
+    """Nem todo classificado tem resumo: o Agente 2 pode ter falhado."""
+    eid = _email(base, assunto="Sem resumo")
+
+    assert emails_query.excluir_email(TENANT, eid)["apagado"] is True

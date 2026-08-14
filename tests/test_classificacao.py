@@ -142,15 +142,18 @@ async def _rodar(tenant=TENANT, **kw):
 
     import reflex as rx
 
+    origem = kw.pop("origem", "manual")
     with rx.session() as s:
-        rodada = ClassificacaoRun(tenant_id=tenant, origem=kw.pop("origem", "manual"))
+        rodada = ClassificacaoRun(tenant_id=tenant, origem=origem)
         s.add(rodada)
         s.commit()
         s.refresh(rodada)
         run_id = rodada.id
 
     eventos, resumo, erro = [], None, None
-    async for evento in classificacao.stream_classificacao(tenant, run_id=run_id, **kw):
+    async for evento in classificacao.stream_classificacao(
+        tenant, run_id=run_id, origem=origem, **kw
+    ):
         eventos.append(evento)
         if evento[0] == "done":
             resumo = evento[1]
@@ -449,13 +452,38 @@ async def test_pasta_nao_mapeada_impede_a_rodada_antes_de_gastar_token(
     assert not falsa.houve("mover_mensagem")
 
 
-async def test_classificacao_desligada_nao_roda(caixa, modelo):
+async def test_agendado_nao_roda_com_o_automatico_parado(caixa, modelo):
+    """O botão Parar do painel desliga o agendado, e desliga ANTES do primeiro token."""
+    caixa.add_email(assunto="Pedido")
     classificacao_config.salvar_config(TENANT, ativo=False)
 
-    _, resumo, erro = await _rodar()
+    _, resumo, erro = await _rodar(origem="agendado")
 
-    assert erro is not None and "desligada" in erro
+    assert erro is not None and "paradas" in erro
     assert modelo.chamadas == 0
+    assert not caixa.houve("mover_mensagem")
+
+
+async def test_botao_manual_roda_mesmo_com_o_automatico_parado(caixa, modelo):
+    """"Classificar agora" é ação deliberada de quem está olhando a tela.
+
+    Precisa funcionar justamente com o automático parado: é assim que se testa
+    a configuração antes de soltar o agente na caixa.
+    """
+    caixa.add_email(assunto="Pedido")
+    classificacao_config.salvar_config(TENANT, ativo=False)
+
+    _, resumo, erro = await _rodar(origem="manual")
+
+    assert erro is None
+    assert resumo["classificados"] == 1
+
+
+async def test_o_automatico_nasce_desligado():
+    """Configurar horário não é o mesmo que autorizar o agente a mexer na caixa."""
+    from sales_support_agent.models import ClassificacaoConfig
+
+    assert ClassificacaoConfig().ativo is False
 
 
 async def test_dry_run_nao_escreve_em_lugar_nenhum(caixa, modelo, banco):
@@ -568,3 +596,274 @@ async def test_rodada_recente_em_andamento_nao_e_encerrada(banco, organizacao):
 
     assert classificacao.recuperar_rodada_travada(TENANT) is None
     assert classificacao.ha_rodada_em_andamento(TENANT) is True
+
+
+# ---------------------------------------------------------------------------
+# Zerar contadores: o que o botão do painel apaga, e o que ele NÃO pode apagar
+# ---------------------------------------------------------------------------
+def _zerar(tenant=TENANT):
+    """Reproduz o que `DashboardState.zerar_contadores` faz no banco.
+
+    O handler vive no State e depende de sessão de browser; o que importa
+    travar aqui é a REGRA: quais tabelas somem e quais sobrevivem.
+    """
+    import reflex as rx
+
+    from sales_support_agent.models import (
+        ClassificacaoRun, EmailClassificado, ResumoEmail,
+    )
+
+    with rx.session() as s:
+        ids = [
+            e.id for e in s.query(EmailClassificado)
+            .filter(EmailClassificado.tenant_id == tenant).all()
+        ]
+        resumos = 0
+        if ids:
+            resumos = (
+                s.query(ResumoEmail).filter(ResumoEmail.email_id.in_(ids))
+                .delete(synchronize_session=False)
+            )
+            s.flush()
+        emails = (
+            s.query(EmailClassificado).filter(EmailClassificado.tenant_id == tenant)
+            .delete(synchronize_session=False)
+        )
+        rodadas = (
+            s.query(ClassificacaoRun).filter(ClassificacaoRun.tenant_id == tenant)
+            .delete(synchronize_session=False)
+        )
+        s.commit()
+    return emails, resumos, rodadas
+
+
+async def test_zerar_apaga_execucoes_emails_e_resumos(caixa, modelo, banco):
+    from sqlmodel import Session
+
+    from sales_support_agent.models import ClassificacaoRun, EmailClassificado, ResumoEmail
+
+    caixa.add_email(assunto="Pedido")
+    await _rodar()
+
+    emails, resumos, rodadas = _zerar()
+
+    assert emails == 1 and resumos == 1 and rodadas == 1
+    with Session(banco) as s:
+        assert s.query(EmailClassificado).count() == 0
+        assert s.query(ResumoEmail).count() == 0
+        assert s.query(ClassificacaoRun).count() == 0
+
+
+async def test_zerar_nao_toca_no_custo_nem_na_configuracao(caixa, modelo, banco):
+    """O gasto aconteceu de verdade, e a pasta vinculada não é contador."""
+    from sqlmodel import Session
+
+    from sales_support_agent.models import PastaClasse, TokenUsage
+
+    caixa.add_email(assunto="Pedido")
+    await _rodar()
+
+    with Session(banco) as s:
+        s.add(TokenUsage(
+            tenant_id=TENANT, agent_name="classificacao_agent",
+            model="gpt-5.4-mini", input_tokens=100, output_tokens=10,
+        ))
+        s.commit()
+        pastas_antes = s.query(PastaClasse).count()
+
+    _zerar()
+
+    with Session(banco) as s:
+        assert s.query(TokenUsage).count() == 1, "zerar o painel reescreveu o custo"
+        assert s.query(PastaClasse).count() == pastas_antes, "zerar desvinculou as pastas"
+        cfg = classificacao_config.get_config(TENANT)
+        assert cfg["horario_1"] and cfg["horario_2"], "zerar apagou os horários"
+
+
+async def test_depois_de_zerar_o_mesmo_email_e_reprocessado(caixa, modelo, banco):
+    """A consequência de custo que o aviso do diálogo precisa declarar.
+
+    O registro apagado é justamente a trava que impede pagar duas vezes pelo
+    mesmo e-mail.
+    """
+    caixa.add_email(assunto="Pedido")
+    await _rodar()
+    chamadas_primeira = modelo.chamadas
+    assert chamadas_primeira > 0
+
+    # De volta à caixa de entrada, como estaria numa janela sobreposta: é o
+    # único cenário em que a deduplicação de fato age.
+    def _devolver():
+        for mensagem in caixa.mensagens.values():
+            mensagem["_pasta"] = "inbox"
+
+    _devolver()
+    _, resumo, erro = await _rodar()
+    assert resumo["puladas"] == 1, "a deduplicação não agiu antes de zerar"
+
+    _zerar()
+    _devolver()
+    _, resumo, erro = await _rodar()
+
+    assert erro is None
+    assert resumo["puladas"] == 0
+    assert resumo["classificados"] == 1
+    assert modelo.chamadas > chamadas_primeira, "não reclassificou depois de zerar"
+
+
+# ---------------------------------------------------------------------------
+# Prioridade em duas faixas e marca de procedência
+# ---------------------------------------------------------------------------
+async def test_data_alem_da_janela_vira_importante_e_nao_urgente(caixa, modelo, banco):
+    """Data distante é compromisso assumido, e antes sumia junto com o resto."""
+    from sqlmodel import Session
+
+    caixa.add_email(assunto="Entrega em duas semanas")
+    modelo.resposta = {
+        "classe": "pedido", "confianca": 90, "urgencia_prazo_horas": 336,
+        "urgente_semantico": False, "urgente": False, "importante": True,
+        "justificativa": "x",
+    }
+
+    _, resumo, erro = await _rodar()
+
+    assert erro is None
+    assert resumo["urgentes"] == 0
+    assert resumo["importantes"] == 1
+
+    marcada = next(iter(caixa.mensagens.values()))
+    assert "Importante" in marcada["categorias"]
+    assert "Urgente" not in marcada["categorias"]
+
+    with Session(banco) as s:
+        linha = s.query(EmailClassificado).first()
+        assert linha.importante is True and linha.urgente is False
+
+
+async def test_todo_classificado_recebe_a_marca_de_classificado_por_ia(caixa, modelo):
+    """Permite separar no Outlook o que o agente arquivou do que foi à mão."""
+    from sales_support_agent.services.classificacao_rules import CATEGORIA_IA
+
+    caixa.add_email(assunto="Pedido")
+
+    await _rodar()
+
+    assert CATEGORIA_IA in next(iter(caixa.mensagens.values()))["categorias"]
+
+
+async def test_ignorado_nao_recebe_marca_nenhuma(caixa, modelo):
+    """Ele não foi tocado, e dizer que foi seria mentira no Outlook."""
+    caixa.add_email(assunto="Newsletter")
+    modelo.resposta = {
+        "classe": "", "confianca": 20, "urgencia_prazo_horas": None,
+        "urgente_semantico": False, "urgente": False, "importante": False,
+        "justificativa": "x",
+    }
+
+    _, resumo, _ = await _rodar()
+
+    assert resumo["ignorados"] == 1
+    assert next(iter(caixa.mensagens.values()))["categorias"] == []
+    assert not caixa.houve("mover_mensagem")
+
+
+async def test_o_sinal_semantico_e_persistido_para_o_recalculo(caixa, modelo, banco):
+    """Sem persistir, o recálculo teria de adivinhar pela ausência de prazo."""
+    from sqlmodel import Session
+
+    caixa.add_email(assunto="Estamos parados esperando")
+    modelo.resposta = {
+        "classe": "pedido", "confianca": 90, "urgencia_prazo_horas": None,
+        "urgente_semantico": True, "urgente": True, "importante": False,
+        "justificativa": "x",
+    }
+
+    await _rodar()
+
+    with Session(banco) as s:
+        assert s.query(EmailClassificado).first().urgente_semantico is True
+
+
+# ---------------------------------------------------------------------------
+# Progresso visível para a execução agendada
+# ---------------------------------------------------------------------------
+async def test_o_andamento_e_gravado_na_rodada_a_cada_email(caixa, modelo, banco):
+    """É o que faz a barra de progresso funcionar para o AGENDADO.
+
+    A rodada agendada acontece noutro processo e nunca toca o State do
+    navegador de ninguém: sem o andamento na linha, quem abre o painel às 08:01
+    vê uma tela parada enquanto o agente trabalha.
+    """
+    from sqlmodel import Session
+
+    from sales_support_agent.services import emails_query
+
+    # O agendado só roda com o interruptor ligado (ver o botão Iniciar do
+    # painel); sem isto a rodada recusaria antes de qualquer progresso.
+    classificacao_config.salvar_config(TENANT, ativo=True)
+    for i in range(3):
+        caixa.add_email(assunto=f"Pedido {i}", imid=f"<p{i}@t.com>")
+
+    vistos = []
+    original = classificacao._marcar_progresso
+
+    def _espiao(run_id, processados, total):
+        original(run_id, processados, total)
+        with Session(banco) as s:
+            linha = s.get(ClassificacaoRun, run_id)
+            vistos.append((linha.processados, linha.total_emails))
+
+    classificacao._marcar_progresso = _espiao
+    try:
+        await _rodar(origem="agendado")
+    finally:
+        classificacao._marcar_progresso = original
+
+    assert (0, 3) in vistos, "o total precisa aparecer antes do primeiro e-mail"
+    assert (3, 3) in vistos, "o andamento final precisa chegar à linha da rodada"
+
+
+async def test_progresso_execucao_enxerga_a_rodada_em_andamento(caixa, modelo, banco):
+    """A consulta que a tela sonda enquanto o agente trabalha."""
+    from sqlmodel import Session
+
+    from sales_support_agent.services import emails_query
+
+    with Session(banco) as s:
+        rodada = ClassificacaoRun(
+            tenant_id=TENANT, origem="agendado", status="running",
+            processados=2, total_emails=5,
+        )
+        s.add(rodada)
+        s.commit()
+
+    p = emails_query.progresso_execucao(TENANT)
+
+    assert p["em_andamento"] is True
+    assert p["origem"] == "agendado"
+    assert (p["processados"], p["total"]) == (2, 5)
+
+
+async def test_progresso_execucao_reporta_a_ultima_concluida(caixa, modelo, banco):
+    """É a comparação de id que transforma "terminou" em "acabou de terminar"."""
+    from sales_support_agent.services import emails_query
+
+    from sqlmodel import Session
+
+    from sales_support_agent.services import agendador
+
+    caixa.add_email(assunto="Pedido")
+    eventos, resumo, _ = await _rodar()
+
+    # `_rodar` não fecha a linha: quem fecha, no código de verdade, é o
+    # `finalizar_rodada` do agendador, e é ele que muda o status para "done".
+    with Session(banco) as s:
+        run_id = s.query(ClassificacaoRun).order_by(ClassificacaoRun.id.desc()).first().id
+    agendador.finalizar_rodada(run_id, resumo or {}, "")
+
+    p = emails_query.progresso_execucao(TENANT)
+
+    assert p["em_andamento"] is False
+    assert p["ultima_run_id"] == run_id
+    assert p["ultima_status"] == "done"
+    assert p["ultima_classificados"] == 1

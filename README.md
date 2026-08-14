@@ -11,15 +11,25 @@ Caixa de entrada -> Classificação -> Resumo -> Consulta
 
 | Agente | O que faz |
 |---|---|
-| **Classificação** | Separa cada e-mail em pedido, proposta, revisão de pedido ou revisão de proposta. Marca o urgente, aplica a categoria no Outlook e move para a pasta da classe. |
-| **Resumo** | Escreve, para cada e-mail classificado, o que o cliente quer, os pontos principais e o próximo passo. |
+| **Classificação** | Separa cada e-mail em pedido, proposta, revisão de pedido ou revisão de proposta. Marca o urgente e o importante, aplica as categorias no Outlook e move para a pasta da classe. |
+| **Resumo** | Escreve, para cada e-mail classificado, o que o cliente quer, os pontos principais e o próximo passo da equipe de propostas e pedidos. |
 | **Consulta** | Chat que responde perguntas sobre os e-mails classificados: o que está urgente, o que chegou de um cliente, quantas propostas estão em aberto. |
 
 E-mail que não se encaixa em nenhuma das quatro classes **não é marcado nem
 movido**: ele fica exatamente onde estava.
 
+A prioridade tem duas faixas: **urgente** quando a data pedida cai dentro da
+janela configurada, e **importante** quando existe data, mas além dela. Todo
+e-mail classificado leva também a categoria `Classificado por IA`, que é o que
+separa no Outlook o que o agente arquivou do que uma pessoa arquivou à mão.
+
 A classificação roda **duas vezes por dia**, nos horários que o time define, e
 também sob demanda por um botão no painel.
+
+As execuções automáticas têm um interruptor, e ele **nasce desligado**: definir
+os horários não liga o agente, quem liga é o botão "Iniciar automático" do
+painel. O botão "Classificar agora" funciona mesmo com o automático parado, que
+é como se confere a configuração antes de soltar o agente na caixa.
 
 ## Requisitos
 
@@ -73,7 +83,9 @@ configuração dos agentes.
 
    O `--dry-run` lê e classifica sem escrever nada, nem no Outlook nem no banco.
 4. Ajuste os dois horários e a janela de urgência, e clique em "Classificar
-   agora".
+   agora". Confira o resultado na caixa.
+5. Só então clique em **"Iniciar automático"**. Antes disso nenhum horário
+   dispara, nem depois de reiniciar o servidor.
 
 ## Acesso
 
@@ -90,6 +102,11 @@ em `/admin`), rodar o `seed` de novo restaura a permissão sem tocar na senha.
 
 O único consumo medido é o de tokens da OpenAI, exibido em `/admin` em dólares,
 com preço por modelo e gráfico dos últimos 6 meses.
+
+Uma pergunta na Consulta IA são **quatro** chamadas ao modelo, e não uma: a
+verificação de escopo roda na entrada e na saída, além da escolha de ferramenta
+e da resposta. As quatro entram na conta, inclusive quando a pergunta é
+recusada.
 
 Cada execução tem dois limites, editáveis no `/dashboard`:
 

@@ -46,7 +46,14 @@ def confirm_dialog(
     return rx.alert_dialog.root(
         rx.alert_dialog.content(
             rx.alert_dialog.title(title, color="white"),
-            rx.alert_dialog.description(body, color="rgba(255, 255, 255, 0.75)"),
+            # `pre-line` para que um `body` com parágrafos separados por "\n\n"
+            # apareça com as quebras. Sem isso o HTML colapsa tudo num bloco
+            # corrido, e um aviso longo vira parede de texto justamente na tela
+            # em que o usuário precisa ler antes de apagar. Não afeta os avisos
+            # de uma frase só, que não têm quebra nenhuma.
+            rx.alert_dialog.description(
+                body, color="rgba(255, 255, 255, 0.75)", white_space="pre-line",
+            ),
             rx.flex(
                 rx.alert_dialog.cancel(dialog_cancel_button()),
                 rx.alert_dialog.action(

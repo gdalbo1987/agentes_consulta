@@ -242,6 +242,28 @@ boleto, currículo e convite de reunião ficam onde estavam.
   nenhuma execução concluída, os dois mostram `-`.
 - **E-mails classificados**, no acumulado, e **na última execução**.
 
+### Zerar contadores
+
+O botão discreto abaixo dos indicadores apaga **todas** as execuções, os e-mails
+classificados e os resumos, devolvendo o painel ao estado de instalação nova.
+Serve para começar do zero depois de uma bateria de testes. Ele pede confirmação
+antes, e a ação não pode ser desfeita.
+
+Três coisas que ele **não** faz:
+
+- **Não desfaz nada no Outlook.** O que já foi arquivado continua nas pastas,
+  com as categorias que recebeu. Se quiser desfazer, mova à mão.
+- **Não apaga o histórico de custo** em `/admin`. O gasto aconteceu de verdade.
+- **Não mexe na configuração** nem nas pastas vinculadas.
+
+E uma que ele faz, e que custa dinheiro: é o registro apagado aqui que impede
+pagar duas vezes pelo mesmo e-mail. Depois de zerar, a próxima execução
+reclassifica tudo o que estiver dentro da janela de varredura e cobra de novo
+por isso. Zerar com a janela em 48h é diferente de zerar com ela em 480.
+
+Vale para toda a equipe: a caixa é compartilhada e o painel é o mesmo para
+todos.
+
 ### Configuração das execuções
 
 - **Primeiro e segundo horário**: quando a classificação roda sozinha.
@@ -264,10 +286,134 @@ completo. Escolher sozinho arquivaria e-mail na pasta errada em silêncio.
 proposital: começar e parar no meio deixaria parte dos e-mails arquivada e parte
 na caixa de entrada, que é o pior dos dois mundos.
 
+### Iniciar e parar as execuções automáticas
+
+Definir os horários **não** liga o agente. Configurar quando ele rodaria é uma
+coisa; autorizá-lo a mexer na caixa é outra. Quem liga é o botão **"Iniciar
+automático"**, e o painel mostra o estado atual com um selo: "Automático parado"
+ou "Em execução automática", com a data e a hora do próximo disparo.
+
+Enquanto estiver parado, nenhum horário dispara, nem quando o servidor é
+reiniciado. Uma instalação nova nasce parada.
+
+**"Parar automático"** desliga os dois horários. Ele não interrompe uma execução
+em andamento: ela termina e nenhuma outra começa. Parar no meio deixaria parte
+dos e-mails arquivada e parte na caixa de entrada.
+
+Só é possível iniciar depois que as quatro pastas estiverem vinculadas e os dois
+horários forem válidos. Ligar com pasta faltando agendaria duas falhas por dia,
+nos horários em que ninguém está olhando o painel.
+
 ### Classificar agora
 
 Roda a classificação na hora, sem esperar o horário. É exatamente a mesma
 execução que roda sozinha.
+
+**Este botão funciona mesmo com o automático parado**, e é de propósito: é assim
+que se confere a configuração, uma vez, antes de soltar o agente para rodar
+todo dia. A ordem recomendada é vincular as pastas, clicar em "Classificar
+agora", conferir o resultado na caixa, e só então clicar em "Iniciar
+automático".
+
+### Acompanhar uma execução
+
+Enquanto a classificação roda, aparece uma **barra de progresso** com o número
+de e-mails já processados e o assunto do que está sendo classificado agora.
+Vale para as duas origens: o botão "Classificar agora" e a execução automática.
+No automático o painel diz "Execução automática em andamento", para você saber
+que não foi ninguém que clicou.
+
+Quando termina, um aviso verde mostra o resultado (quantos classificados,
+ignorados e já conhecidos) e **a lista se atualiza sozinha**. Se a execução
+falhar, o aviso é vermelho e traz o motivo.
+
+O painel descobre isso consultando o banco de tempos em tempos, e não pela sua
+sessão: por isso a execução automática aparece mesmo que você não tenha tocado
+em nada.
+
+### Atualizar a lista
+
+O botão "Atualizar", acima da tabela, recarrega os indicadores e a lista na
+hora. O painel já se atualiza sozinho ao fim de cada execução; este botão é
+para quando você quiser conferir agora, sem esperar.
+
+### Urgente e Importante
+
+São duas faixas, e um e-mail nunca tem as duas:
+
+- **Urgente**: o e-mail pede entrega ou resposta **dentro da janela**
+  configurada, ou trata o assunto como urgente sem dar data ("estamos parados
+  esperando").
+- **Importante**: o e-mail tem uma data, mas ela está **além da janela**. Ter
+  data é compromisso assumido, mesmo distante. Antes esse caso ficava
+  indistinguível de um e-mail sem data nenhuma e só reaparecia quando já era
+  tarde.
+
+Apertar a janela **rebaixa** um urgente para importante; ela nunca apaga a
+prioridade de um e-mail que tem data.
+
+O painel de Urgências mostra só os urgentes, de propósito: ele é a fila do que
+precisa ser atendido agora.
+
+### As categorias no Outlook
+
+Cada e-mail classificado recebe a categoria da classe (Pedido, Proposta,
+Revisão de pedido, Revisão de proposta), mais **"Classificado por IA"**, mais
+"Urgente" ou "Importante" quando for o caso.
+
+A marca "Classificado por IA" existe para você distinguir, de olho, o que a
+plataforma arquivou do que alguém arquivou à mão. É também o que permite achar
+tudo o que o agente tocou, com uma busca por categoria, caso uma execução saia
+errada. E-mail que não se encaixou em nenhuma classe **não** recebe essa marca:
+ele não foi tocado.
+
+As categorias aparecem sem cor no Outlook enquanto a permissão
+`MailboxSettings.ReadWrite` não for concedida no Entra ID. É opcional e não
+afeta a classificação.
+
+A plataforma **nunca remove** categoria: ela lê as que já existem e manda a
+união. O que você marcou à mão no Outlook continua lá.
+
+Se a marca "Classificado por IA" for acrescentada depois que a caixa já tem
+e-mails arquivados, eles não a recebem sozinhos: e-mail já conhecido é pulado
+sem nenhuma chamada ao modelo. Para aplicá-la ao que já está classificado:
+
+```bash
+python scripts/aplicar_categoria_ia.py --dry-run   # mostra o que faria
+python scripts/aplicar_categoria_ia.py             # aplica
+```
+
+Não gasta token nenhum e pode ser repetido sem duplicar.
+
+### Tirar um e-mail da lista de urgências
+
+Cada item do painel de Urgências tem um botão de visto. Ele diz "já tratei
+disto": o e-mail sai da fila e **nada é apagado**. Ele continua no banco, na
+tabela de classificados, nas respostas da Consulta IA e no Outlook, com a
+categoria "Urgente" intacta.
+
+A fila é uma lista de trabalho, e não um relatório: o que já foi resolvido sai
+dela. Por isso tirar da fila é diferente de deixar de ser urgente, e sobrevive a
+uma mudança da janela de urgência.
+
+Clicou sem querer? Abra o e-mail na tabela e use "Voltar para urgências".
+
+### Excluir um e-mail do banco
+
+O ícone de lixeira, na última coluna da tabela (ou o botão dentro do detalhe),
+apaga aquele e-mail e o resumo dele. Pede confirmação antes.
+
+Três coisas para saber:
+
+- **A mensagem NÃO é apagada do Outlook.** Ela continua na pasta em que foi
+  arquivada, com as categorias que recebeu. Isto aqui é só o registro do painel.
+- **Ela some da Consulta IA também.** O chat responde a partir do mesmo banco.
+- **Atenção ao custo**: é este registro que impede pagar duas vezes pelo mesmo
+  e-mail. Se a mensagem voltar para a Caixa de Entrada dentro da janela de
+  varredura, ela será reclassificada e cobrada de novo.
+
+Para limpar tudo de uma vez, use "Zerar contadores" em vez de apagar linha a
+linha.
 
 ### Urgências
 
@@ -310,8 +456,14 @@ ele possa usar para obedecer. Se um e-mail tiver esse tipo de conteúdo, o
 assistente vai RELATAR isso para você, e não obedecer.
 
 Perguntas fora do assunto (conhecimento geral, outros sistemas, pedidos de
-código) são recusadas. O botão "Limpar conversa" apaga o histórico do seu chat,
-que é individual.
+código) são recusadas. Saudação e agradecimento, não: ele responde e oferece o
+que sabe fazer. O botão "Limpar conversa" apaga o histórico do seu chat, que é
+individual.
+
+Se a verificação de escopo estiver fora do ar, a pergunta passa em vez de ser
+recusada. É a escolha certa aqui: o assistente não tem nenhuma função de
+escrita, então uma pergunta a mais passando não causa dano, enquanto uma
+recusa indevida deixa você sem a ferramenta.
 
 ## 2.5 Meu Perfil
 
@@ -322,7 +474,10 @@ Em `/profile` você atualiza a foto e troca a senha.
 Além de tudo acima, você tem `/admin`:
 
 - **Consumo de tokens** da OpenAI, em dólares, com o preço de cada modelo e o
-  gráfico dos últimos 6 meses.
+  gráfico dos últimos 6 meses. Uma pergunta na Consulta IA custa mais do que
+  parece: são quatro chamadas ao modelo por pergunta, porque a verificação de
+  escopo roda na entrada e na saída. Pergunta recusada também custa, e também
+  aparece aqui.
 - **Configuração dos três agentes**: qual modelo e qual esforço de raciocínio
   cada um usa. Vale na próxima execução, sem reiniciar nada.
 - **Preço do token por modelo**, em dólares por 1 milhão de tokens.

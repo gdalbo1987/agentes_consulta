@@ -457,6 +457,14 @@ def modelo_do_agente(agent_name: str) -> str:
     return get_agent_config(chave)[0] if chave else ""
 
 
+# Cadência da sondagem do painel. Rodando, a barra precisa parecer viva;
+# parado, o laço só existe para perceber que o agendador começou uma rodada, o
+# que acontece duas vezes por dia. Uma consulta leve a cada 15s é barata perto
+# de deixar o usuário sem sinal nenhum do automático.
+_POLL_RODANDO_SEGUNDOS = 3
+_POLL_PARADO_SEGUNDOS = 15
+
+
 class EmailUI(BaseModel):
     """Linha da tabela e do painel de urgências, já achatada.
 
@@ -470,6 +478,12 @@ class EmailUI(BaseModel):
     recebido_em: str
     classe_label: str
     urgente: bool
+    importante: bool = False
+    # "Urgente" | "Importante" | "Normal", já resolvido no serviço: o `foreach`
+    # do Reflex não faz condicional aninhada bem, e a regra de qual das duas
+    # vale é de negócio, não de tela.
+    prioridade: str = "Normal"
+    urgencia_tratada: bool = False
     resumo: str = ""
     acao_sugerida: str = ""
 
@@ -504,6 +518,19 @@ class DashboardState(AppState):
     progresso_texto: str = ""
     progresso_atual: int = 0
     progresso_total: int = 0
+    # Origem da rodada em curso, para a tela dizer se é o automático ou alguém
+    # que clicou. Sem isso, quem abre o painel às 08:01 vê barra andando e não
+    # sabe de onde veio.
+    execucao_origem: str = ""
+    # Aviso de conclusão, mostrado uma vez quando a rodada termina. Vive
+    # separado do toast porque o toast some, e quem estava noutra aba precisa
+    # ver que terminou.
+    conclusao_texto: str = ""
+    conclusao_erro: bool = False
+    # Última rodada finalizada que esta sessão JÁ viu. É a comparação que
+    # transforma "existe rodada terminada" em "acabou de terminar agora".
+    _ultima_run_vista: int = 0
+    _monitorando: bool = False
 
     # --- configuração (espelha ClassificacaoConfig) ---
     horario_1: str = "08:00"
@@ -511,6 +538,9 @@ class DashboardState(AppState):
     janela_urgencia_horas: str = "24"
     lookback_horas: str = "48"
     proxima_execucao: str = "-"
+    # Interruptor do AGENDADO. Não desabilita "Classificar agora".
+    agendamento_ativo: bool = False
+    confirm_zerar_open: bool = False
 
     # --- pastas ---
     pastas: List[PastaUI] = []
@@ -538,6 +568,13 @@ class DashboardState(AppState):
     detalhe_prazo: str = ""
     detalhe_disponivel: bool = False
     detalhe_link: str = ""
+    detalhe_id: int = 0
+    detalhe_urgencia_tratada: bool = False
+
+    # Exclusão de um e-mail: qual, e o diálogo de confirmação.
+    confirm_excluir_open: bool = False
+    excluir_id: int = 0
+    excluir_assunto: str = ""
 
     # ------------------------------------------------------- setters à mão
     def set_horario_1(self, value: str):
@@ -570,6 +607,12 @@ class DashboardState(AppState):
     def set_detalhe_aberto(self, value: bool):
         self.detalhe_aberto = value
 
+    def set_confirm_zerar_open(self, value: bool):
+        self.confirm_zerar_open = value
+
+    def set_confirm_excluir_open(self, value: bool):
+        self.confirm_excluir_open = value
+
     def limpar_filtros(self):
         self.filtro_data_inicio = ""
         self.filtro_data_fim = ""
@@ -596,6 +639,7 @@ class DashboardState(AppState):
         self.horario_2 = cfg["horario_2"]
         self.janela_urgencia_horas = str(cfg["janela_urgencia_horas"])
         self.lookback_horas = str(cfg["lookback_horas"])
+        self.agendamento_ativo = cfg["ativo"]
 
         proxima = classificacao_config.proxima_execucao(brt_now(), cfg)
         self.proxima_execucao = proxima.strftime("%d/%m/%Y %H:%M") if proxima else "-"
@@ -628,6 +672,21 @@ class DashboardState(AppState):
         self.ultima_rodada_quando = m["ultima_rodada_quando"]
         self.ultima_rodada_origem = m["ultima_rodada_origem"]
 
+    def atualizar_lista(self):
+        """Botão "Atualizar" da tabela.
+
+        Existe porque a rodada AGENDADA termina noutro processo: quem estava
+        com o painel aberto continuava vendo a lista de antes, sem nenhum sinal
+        de que havia novidade. O monitoramento automático cobre o caso comum;
+        este botão cobre o resto, e é a saída quando alguém quer conferir agora.
+        """
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+        self.conclusao_texto = ""
+        self._carregar_metricas()
+        self.carregar_tabela()
+        return toast_success("Lista atualizada.")
+
     def carregar_tabela(self):
         from sales_support_agent.services import emails_query
 
@@ -639,6 +698,9 @@ class DashboardState(AppState):
                 recebido_em=dados["recebido_em"],
                 classe_label=dados["classe_label"],
                 urgente=dados["urgente"],
+                importante=dados.get("importante", False),
+                prioridade=dados.get("prioridade", "Normal"),
+                urgencia_tratada=dados.get("urgencia_tratada", False),
                 resumo=dados.get("resumo", ""),
                 acao_sugerida=dados.get("acao_sugerida", ""),
             )
@@ -665,6 +727,27 @@ class DashboardState(AppState):
     @rx.var
     def pastas_pendentes(self) -> bool:
         return any(not p.resolvido for p in self.pastas)
+
+    @rx.var
+    def progresso_percentual(self) -> int:
+        """0 a 100 para a barra. Total desconhecido ainda não é 100."""
+        if self.progresso_total <= 0:
+            return 0
+        return max(0, min(100, int(self.progresso_atual * 100 / self.progresso_total)))
+
+    @rx.var
+    def progresso_contagem(self) -> str:
+        if self.progresso_total <= 0:
+            return ""
+        return f"{self.progresso_atual} de {self.progresso_total}"
+
+    @rx.var
+    def execucao_rotulo(self) -> str:
+        return (
+            "Execução automática em andamento"
+            if self.execucao_origem == "agendado"
+            else "Classificação em andamento"
+        )
 
     # ------------------------------------------------------- configuração
     def salvar_configuracao(self):
@@ -708,7 +791,257 @@ class DashboardState(AppState):
         recado = "Configuração salva."
         if alteradas:
             recado += f" {alteradas} e-mail(s) tiveram a marcação de urgente revista."
+        if not self.agendamento_ativo:
+            recado += " As execuções automáticas seguem paradas: use o botão Iniciar."
         return [toast_success(recado), DashboardState.load_dashboard_data]
+
+    def iniciar_agendamento(self):
+        """Liga as execuções automáticas.
+
+        Salvar horário NÃO liga: configurar quando o agente rodaria é diferente
+        de autorizá-lo a mexer na caixa. Por isso o interruptor é um botão
+        separado, e por isso `ClassificacaoConfig.ativo` nasce desligado.
+        """
+        from sales_support_agent.services import agendador, classificacao_config
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        # Ligar com pasta faltando agendaria duas falhas por dia, nos horários
+        # em que ninguém está olhando o painel. Melhor recusar aqui, com a
+        # mensagem que diz o que fazer.
+        if self.pastas_pendentes:
+            return toast_error(
+                "Vincule a pasta do Outlook das quatro classes antes de iniciar "
+                "as execuções automáticas."
+            )
+        for rotulo_campo, valor in (("horário 1", self.horario_1), ("horário 2", self.horario_2)):
+            if not _hhmm_ok(valor):
+                return toast_error(
+                    f"O {rotulo_campo} precisa estar no formato HH:MM antes de iniciar."
+                )
+
+        classificacao_config.salvar_config(self.tenant_id, ativo=True)
+        agendador.reprogramar(self.tenant_id)
+
+        with rx.session() as session:
+            self.log_activity(
+                "CLASSIFICACAO_INICIADA",
+                f"Execuções automáticas iniciadas nos horários {self.horario_1} e "
+                f"{self.horario_2}.",
+                session,
+            )
+
+        return [
+            toast_success(
+                f"Execuções automáticas iniciadas. Rodará às {self.horario_1} e às "
+                f"{self.horario_2}."
+            ),
+            DashboardState.load_dashboard_data,
+        ]
+
+    def parar_agendamento(self):
+        """Desliga as execuções automáticas.
+
+        Não cancela uma rodada em andamento: ela termina e nenhuma outra
+        começa. Interromper no meio deixaria parte dos e-mails arquivada e
+        parte na caixa de entrada, que é justamente o estado que o resto do
+        pipeline evita.
+        """
+        from sales_support_agent.services import agendador, classificacao_config
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        classificacao_config.salvar_config(self.tenant_id, ativo=False)
+        agendador.reprogramar(self.tenant_id)
+
+        with rx.session() as session:
+            self.log_activity(
+                "CLASSIFICACAO_PARADA", "Execuções automáticas paradas.", session
+            )
+
+        return [
+            toast_success(
+                "Execuções automáticas paradas. O botão Classificar agora continua "
+                "funcionando."
+            ),
+            DashboardState.load_dashboard_data,
+        ]
+
+    def zerar_contadores(self):
+        """Apaga o histórico de operação: execuções, e-mails classificados e resumos.
+
+        Zera os quatro indicadores, a lista de urgências e a tabela. É o que o
+        usuário chama de "começar do zero" depois de uma bateria de testes.
+
+        O que NÃO entra, e por quê:
+
+        * `TokenUsage`. O gasto aconteceu de verdade e o custo em `/admin` é
+          contabilidade, não indicador de operação. Zerá-lo aqui reescreveria
+          histórico financeiro a partir de uma tela que nem é do super admin.
+        * `ActivityLog`. É a auditoria, e apagá-la junto apagaria o registro
+          desta própria limpeza.
+        * `ClassificacaoConfig` e `PastaClasse`. São configuração, não contador:
+          zerar o painel não pode desvincular as pastas do Outlook.
+        * A caixa de e-mails. Nada é movido de volta e nenhuma categoria é
+          removida; o que já foi arquivado continua arquivado.
+
+        O filtro por `tenant_id` aqui é escopo, e não o critério da limpeza: só
+        estas três tabelas de OPERAÇÃO são tocadas, nunca `User`, `Tenant` ou
+        as credenciais (ver invariante 1 do CLAUDE.md).
+        """
+        from sales_support_agent.models import ClassificacaoRun, EmailClassificado, ResumoEmail
+        from sales_support_agent.services import classificacao
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        # Apagar a linha da rodada que está rodando faria o `finalizar_rodada`
+        # gravar num registro que não existe mais, e o progresso na tela ficaria
+        # órfão. Esperar terminar é a resposta certa.
+        if classificacao.ha_rodada_em_andamento(self.tenant_id):
+            self.confirm_zerar_open = False
+            return toast_error(
+                "Há uma classificação em andamento. Espere ela terminar para zerar."
+            )
+
+        with rx.session() as session:
+            emails = (
+                session.query(EmailClassificado)
+                .filter(EmailClassificado.tenant_id == self.tenant_id)
+                .all()
+            )
+            ids = [e.id for e in emails]
+
+            # O resumo referencia o e-mail por chave estrangeira: o filho sai
+            # primeiro, e só então o pai. Na ordem inversa o PostgreSQL recusa
+            # e a transação inteira reverte.
+            resumos = 0
+            if ids:
+                resumos = (
+                    session.query(ResumoEmail)
+                    .filter(ResumoEmail.email_id.in_(ids))
+                    .delete(synchronize_session=False)
+                )
+                session.flush()
+
+            apagados = (
+                session.query(EmailClassificado)
+                .filter(EmailClassificado.tenant_id == self.tenant_id)
+                .delete(synchronize_session=False)
+            )
+            rodadas = (
+                session.query(ClassificacaoRun)
+                .filter(ClassificacaoRun.tenant_id == self.tenant_id)
+                .delete(synchronize_session=False)
+            )
+            session.commit()
+
+            self.log_activity(
+                "CONTADORES_ZERADOS",
+                f"{apagados} e-mail(s), {resumos} resumo(s) e {rodadas} execução(ões) "
+                "removidos do painel.",
+                session,
+            )
+
+        self.confirm_zerar_open = False
+        return [
+            toast_success(
+                f"Painel zerado: {apagados} e-mail(s), {resumos} resumo(s) e "
+                f"{rodadas} execução(ões) removidos."
+            ),
+            DashboardState.load_dashboard_data,
+        ]
+
+    @rx.event(background=True)
+    async def monitorar_execucao(self):
+        """Acompanha a rodada pelo BANCO, para o automático aparecer na tela.
+
+        A execução agendada roda noutro processo e nunca toca o State de
+        ninguém: sem esta sondagem, quem tem o painel aberto às 08:00 não vê
+        barra de progresso, não vê aviso de conclusão e continua olhando a lista
+        velha. O botão manual já tem o progresso pelo próprio stream; este laço
+        é o que iguala os dois casos.
+
+        Um laço só por sessão de navegador, garantido por `_monitorando`.
+        """
+        import asyncio
+
+        from sales_support_agent.services import emails_query
+
+        async with self:
+            if self._monitorando:
+                return
+            self._monitorando = True
+            tenant_id = self.tenant_id
+
+        try:
+            # Teto de vida do laço. Uma aba esquecida aberta a noite inteira não
+            # pode sondar o banco para sempre; 4h cobre com folga um dia de
+            # trabalho com os dois horários.
+            fim = brt_now() + timedelta(hours=4)
+            while brt_now() < fim:
+                progresso = emails_query.progresso_execucao(tenant_id)
+                terminou = False
+
+                async with self:
+                    self.is_running = progresso["em_andamento"]
+                    if progresso["em_andamento"]:
+                        self.execucao_origem = progresso["origem"]
+                        self.progresso_atual = progresso["processados"]
+                        self.progresso_total = progresso["total"]
+                        self.conclusao_texto = ""
+                        if not self.progresso_texto:
+                            self.progresso_texto = "Classificando..."
+                        self._ultima_run_vista = 0  # a próxima conclusão é novidade
+                    else:
+                        self.execucao_origem = ""
+                        self.progresso_texto = ""
+                        ultima = progresso["ultima_run_id"]
+                        # Só é "acabou agora" se esta sessão ainda não viu esta
+                        # rodada. Sem a comparação, o aviso de concluído
+                        # reapareceria a cada sondagem, para sempre.
+                        if ultima and ultima != self._ultima_run_vista:
+                            primeiro_olhar = self._ultima_run_vista == 0
+                            self._ultima_run_vista = ultima
+                            if not primeiro_olhar:
+                                terminou = True
+                                if progresso["ultima_status"] == "error":
+                                    self.conclusao_erro = True
+                                    self.conclusao_texto = (
+                                        "A classificação terminou com erro: "
+                                        f"{progresso['ultima_erro']}"
+                                    )
+                                else:
+                                    self.conclusao_erro = False
+                                    qual = (
+                                        "automática"
+                                        if progresso["ultima_origem"] == "agendado"
+                                        else "manual"
+                                    )
+                                    self.conclusao_texto = (
+                                        f"Classificação {qual} concluída: "
+                                        f"{progresso['ultima_classificados']} classificado(s), "
+                                        f"{progresso['ultima_ignorados']} ignorado(s), "
+                                        f"{progresso['ultima_puladas']} já conhecido(s)."
+                                    )
+
+                if terminou:
+                    # A lista só se atualiza sozinha aqui. É este ponto que
+                    # resolve "classifiquei no automático e a tabela não mudou".
+                    async with self:
+                        self._carregar_metricas()
+                        self.carregar_tabela()
+
+                async with self:
+                    rodando = self.is_running
+                await asyncio.sleep(
+                    _POLL_RODANDO_SEGUNDOS if rodando else _POLL_PARADO_SEGUNDOS
+                )
+        finally:
+            async with self:
+                self._monitorando = False
 
     @rx.event(background=True)
     async def listar_pastas_do_outlook(self):
@@ -864,7 +1197,80 @@ class DashboardState(AppState):
         self.detalhe_prazo = dados["prazo_mencionado"] or "-"
         self.detalhe_disponivel = dados["resumo_disponivel"]
         self.detalhe_link = dados["web_link"]
+        self.detalhe_id = dados["id"]
+        self.detalhe_urgencia_tratada = dados.get("urgencia_tratada", False)
         self.detalhe_aberto = True
+
+    # ------------------------------------------------------- fila e exclusão
+    def remover_da_urgencia(self, email_id: int):
+        """Tira o e-mail da FILA de urgências. Não apaga nada.
+
+        O painel de urgências é uma fila de trabalho: o que já foi resolvido
+        sai dela. O e-mail continua no banco, na tabela e no Outlook, com a
+        marcação de urgente intacta, porque ela descreve o e-mail e não o estado
+        da fila de quem o lê.
+
+        Marcar `urgente = False` seria mais simples e estaria errado: a urgência
+        é recalculada a partir do prazo sempre que a janela muda, e o próximo
+        recálculo traria de volta tudo o que já tinha sido tratado.
+        """
+        from sales_support_agent.services import emails_query
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        if not emails_query.marcar_urgencia_tratada(self.tenant_id, email_id, True):
+            return toast_error("E-mail não encontrado.")
+
+        self.carregar_tabela()
+        return toast_success(
+            "Removido da lista de urgências. O e-mail continua no banco e na tabela."
+        )
+
+    def devolver_para_urgencia(self, email_id: int):
+        """Desfaz o "já tratei". Existe porque tirar da fila é um clique só."""
+        from sales_support_agent.services import emails_query
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        emails_query.marcar_urgencia_tratada(self.tenant_id, email_id, False)
+        self.detalhe_urgencia_tratada = False
+        self.carregar_tabela()
+        return toast_success("De volta à lista de urgências.")
+
+    def pedir_exclusao(self, email_id: int, assunto: str):
+        """Só abre a confirmação. Apagar é destrutivo e não pede desculpa."""
+        self.excluir_id = email_id
+        self.excluir_assunto = assunto
+        self.confirm_excluir_open = True
+
+    def excluir_email(self):
+        """Apaga um e-mail classificado e o resumo dele. NÃO toca no Outlook."""
+        from sales_support_agent.services import emails_query
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        resultado = emails_query.excluir_email(self.tenant_id, self.excluir_id)
+        self.confirm_excluir_open = False
+        self.excluir_id = 0
+        self.excluir_assunto = ""
+
+        if not resultado["apagado"]:
+            return toast_error("E-mail não encontrado.")
+
+        with rx.session() as session:
+            self.log_activity(
+                "EMAIL_EXCLUIDO",
+                f"E-mail removido do painel: {resultado['assunto'][:120]}",
+                session,
+            )
+
+        self.detalhe_aberto = False
+        self._carregar_metricas()
+        self.carregar_tabela()
+        return toast_success(f"E-mail removido do banco: {resultado['assunto'][:60]}")
 
 
 def _hhmm_ok(texto: str) -> bool:

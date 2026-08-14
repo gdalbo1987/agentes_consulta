@@ -8,6 +8,7 @@ linha. A conversão não mexeu no sistema de design, só no que ele mostra.
 
 import reflex as rx
 
+from sales_support_agent.components.confirm_dialog import confirm_dialog
 from sales_support_agent.components.dashboard_layout import dashboard_layout
 from sales_support_agent.components.data_table import col, table_shell
 from sales_support_agent.pages.admin_dashboard import admin_card
@@ -57,33 +58,94 @@ def _metricas() -> rx.Component:
             subtitle=DashboardState.ultima_rodada_origem,
         ),
         columns=rx.breakpoints(initial="1", sm="2", lg="4"),
-        spacing="4", width="100%", margin_bottom="1.5rem",
+        spacing="4", width="100%", margin_bottom="0.75rem",
+    )
+
+
+def _zerar() -> rx.Component:
+    """Discreto de propósito: apaga o histórico de operação inteiro."""
+    return rx.hstack(
+        rx.spacer(),
+        rx.button(
+            rx.icon(tag="eraser", size=14),
+            "Zerar contadores",
+            on_click=DashboardState.set_confirm_zerar_open(True),
+            variant="ghost",
+            color=colors.TEXT_SEC,
+            size="1",
+            cursor="pointer",
+        ),
+        width="100%", margin_bottom="1.5rem",
+    )
+
+
+def _selo_agendamento() -> rx.Component:
+    """Diz, em uma olhada, se o agente está no ar ou parado."""
+    return rx.cond(
+        DashboardState.agendamento_ativo,
+        rx.hstack(
+            rx.icon(tag="circle-check", size=14, color="#15803d"),
+            rx.text(
+                "Em execução automática", size="1", font_weight="700", color="#15803d",
+                font_family=BODY_FONT,
+            ),
+            spacing="1", align_items="center",
+            background="#dcfce7", padding="0.15rem 0.6rem", border_radius="999px",
+        ),
+        rx.hstack(
+            rx.icon(tag="circle-pause", size=14, color="#b45309"),
+            rx.text(
+                "Automático parado", size="1", font_weight="700", color="#b45309",
+                font_family=BODY_FONT,
+            ),
+            spacing="1", align_items="center",
+            background="#fef3c7", padding="0.15rem 0.6rem", border_radius="999px",
+        ),
     )
 
 
 def _acao() -> rx.Component:
     return rx.hstack(
         rx.vstack(
-            rx.text(
-                "Próxima execução automática", size="2", color=colors.TEXT_SEC,
-                font_family=BODY_FONT,
+            rx.hstack(
+                rx.text(
+                    "Próxima execução automática", size="2", color=colors.TEXT_SEC,
+                    font_family=BODY_FONT,
+                ),
+                _selo_agendamento(),
+                spacing="2", align_items="center",
             ),
             rx.text(
-                DashboardState.proxima_execucao, size="4", font_weight="700",
+                rx.cond(
+                    DashboardState.agendamento_ativo,
+                    DashboardState.proxima_execucao,
+                    "Parado",
+                ),
+                size="4", font_weight="700",
                 color=colors.TEXT_MAIN, font_family=HEADING_FONT,
             ),
             spacing="0", align_items="start",
         ),
         rx.spacer(),
+        # Iniciar e Parar controlam SÓ o automático. "Classificar agora" fica
+        # sempre disponível, inclusive com o automático parado: é assim que se
+        # confere a configuração antes de soltar o agente na caixa.
         rx.cond(
-            DashboardState.is_running,
-            rx.hstack(
-                rx.spinner(size="2"),
-                rx.text(
-                    DashboardState.progresso_texto, size="2", color=colors.TEXT_SEC,
-                    font_family=BODY_FONT,
-                ),
-                spacing="2", align_items="center",
+            DashboardState.agendamento_ativo,
+            rx.button(
+                rx.icon(tag="square", size=16),
+                "Parar automático",
+                on_click=DashboardState.parar_agendamento,
+                background="transparent", color="#b45309", cursor="pointer",
+                border="1px solid #f59e0b",
+            ),
+            rx.button(
+                rx.icon(tag="power", size=16),
+                "Iniciar automático",
+                on_click=DashboardState.iniciar_agendamento,
+                disabled=DashboardState.pastas_pendentes,
+                background="transparent", color="#15803d", cursor="pointer",
+                border="1px solid #22c55e",
             ),
         ),
         rx.button(
@@ -95,6 +157,54 @@ def _acao() -> rx.Component:
             background=colors.BTN_GRADIENT, color="white", cursor="pointer",
         ),
         width="100%", align_items="center", spacing="3", margin_bottom="1.5rem",
+        wrap="wrap",
+    )
+
+
+def _progresso() -> rx.Component:
+    """Barra de progresso e aviso de conclusão.
+
+    Serve as duas origens: o botão manual alimenta o State pelo próprio stream,
+    e a execução automática chega aqui pela sondagem do banco
+    (`DashboardState.monitorar_execucao`). Da tela, as duas são iguais.
+    """
+    return rx.cond(
+        DashboardState.is_running,
+        rx.box(
+            rx.hstack(
+                rx.spinner(size="2"),
+                rx.text(
+                    DashboardState.execucao_rotulo, size="2", font_weight="700",
+                    color=colors.TEXT_MAIN, font_family=BODY_FONT,
+                ),
+                rx.spacer(),
+                rx.text(
+                    DashboardState.progresso_contagem, size="2", color=colors.TEXT_SEC,
+                    font_family=BODY_FONT,
+                ),
+                width="100%", align_items="center", spacing="2",
+            ),
+            rx.progress(
+                value=DashboardState.progresso_percentual, max=100,
+                width="100%", margin_top="0.6rem", margin_bottom="0.4rem",
+            ),
+            rx.text(
+                DashboardState.progresso_texto, size="1", color=colors.TEXT_SEC,
+                font_family=BODY_FONT,
+            ),
+            width="100%", padding="1rem", border_radius="12px",
+            background=colors.CARD_BG, border=f"1px solid {colors.BORDER}",
+            margin_bottom="1.5rem",
+        ),
+        rx.cond(
+            DashboardState.conclusao_texto != "",
+            rx.callout(
+                DashboardState.conclusao_texto,
+                icon=rx.cond(DashboardState.conclusao_erro, "triangle-alert", "circle-check"),
+                color_scheme=rx.cond(DashboardState.conclusao_erro, "red", "green"),
+                width="100%", margin_bottom="1.5rem",
+            ),
+        ),
     )
 
 
@@ -252,6 +362,19 @@ def _urgencias() -> rx.Component:
                                 email.recebido_em, size="1", color=colors.TEXT_SEC,
                                 font_family=BODY_FONT,
                             ),
+                            # Tira da FILA, não do banco. `stop_propagation`
+                            # porque o cartão inteiro abre o detalhe.
+                            rx.tooltip(
+                                rx.button(
+                                    rx.icon(tag="check", size=14),
+                                    on_click=DashboardState.remover_da_urgencia(
+                                        email.id
+                                    ).stop_propagation,
+                                    variant="soft", color_scheme="green",
+                                    size="1", cursor="pointer",
+                                ),
+                                content="Já tratei: tirar das urgências (não apaga)",
+                            ),
                             width="100%", align_items="center", spacing="2",
                         ),
                         rx.text(
@@ -284,8 +407,28 @@ def _linha_email(email) -> rx.Component:
             rx.cond(
                 email.urgente,
                 rx.badge("Urgente", color_scheme="red", size="1"),
-                rx.text("-", size="2", color=colors.TEXT_SEC),
+                rx.cond(
+                    email.importante,
+                    rx.badge("Importante", color_scheme="amber", size="1"),
+                    rx.text("-", size="2", color=colors.TEXT_SEC),
+                ),
             )
+        ),
+        rx.table.cell(
+            rx.tooltip(
+                rx.button(
+                    rx.icon(tag="trash-2", size=14),
+                    # `stop_propagation` porque a linha inteira abre o detalhe:
+                    # sem isso, clicar em apagar abriria o diálogo de detalhe
+                    # por cima do de confirmação.
+                    on_click=DashboardState.pedir_exclusao(
+                        email.id, email.assunto
+                    ).stop_propagation,
+                    variant="ghost", color_scheme="red", size="1", cursor="pointer",
+                ),
+                content="Excluir do banco",
+            ),
+            width="48px",
         ),
         on_click=lambda: DashboardState.abrir_detalhe(email.id),
         cursor="pointer",
@@ -323,6 +466,12 @@ def _tabela() -> rx.Component:
             ),
             rx.spacer(),
             rx.button(
+                rx.icon(tag="refresh-cw", size=14),
+                "Atualizar",
+                on_click=DashboardState.atualizar_lista,
+                variant="soft", cursor="pointer", size="2",
+            ),
+            rx.button(
                 "Limpar filtros", on_click=DashboardState.limpar_filtros,
                 variant="soft", color_scheme="gray", cursor="pointer", size="2",
             ),
@@ -335,7 +484,8 @@ def _tabela() -> rx.Component:
                 color=colors.TEXT_SEC, font_family=BODY_FONT,
             ),
             table_shell(
-                [col("Título"), col("Cliente"), col("Recebido em"), col("Classe"), col("Urgente")],
+                [col("Título"), col("Cliente"), col("Recebido em"), col("Classe"),
+                 col("Prioridade"), col("")],
                 rx.foreach(DashboardState.emails, _linha_email),
             ),
         ),
@@ -419,11 +569,32 @@ def _detalhe() -> rx.Component:
                         href=DashboardState.detalhe_link, is_external=True,
                     ),
                 ),
+                # Desfazer o "já tratei". Tirar da fila é um clique só, sem
+                # confirmação, então precisa ter volta.
+                rx.cond(
+                    DashboardState.detalhe_urgencia_tratada,
+                    rx.button(
+                        rx.icon(tag="undo-2", size=14),
+                        "Voltar para urgências",
+                        on_click=DashboardState.devolver_para_urgencia(
+                            DashboardState.detalhe_id
+                        ),
+                        variant="soft", color_scheme="amber", cursor="pointer", size="2",
+                    ),
+                ),
                 rx.spacer(),
+                rx.button(
+                    rx.icon(tag="trash-2", size=14),
+                    "Excluir do banco",
+                    on_click=DashboardState.pedir_exclusao(
+                        DashboardState.detalhe_id, DashboardState.detalhe_assunto
+                    ),
+                    variant="soft", color_scheme="red", cursor="pointer", size="2",
+                ),
                 rx.dialog.close(
                     rx.button("Fechar", variant="soft", color_scheme="gray", cursor="pointer")
                 ),
-                width="100%", margin_top="1.5rem", align_items="center",
+                width="100%", margin_top="1.5rem", align_items="center", spacing="2",
             ),
             max_width="640px",
         ),
@@ -435,7 +606,13 @@ def _detalhe() -> rx.Component:
 @rx.page(
     route="/dashboard",
     title="Dashboard | Coester",
-    on_load=[AppState.load_dashboard, DashboardState.load_dashboard_data],
+    on_load=[
+        AppState.load_dashboard,
+        DashboardState.load_dashboard_data,
+        # Sonda o andamento pelo banco. É o que faz a execução AGENDADA, que
+        # roda noutro processo, aparecer nesta tela.
+        DashboardState.monitorar_execucao,
+    ],
 )
 def dashboard_page() -> rx.Component:
     return dashboard_layout(
@@ -449,7 +626,9 @@ def dashboard_page() -> rx.Component:
                 color=colors.TEXT_SEC, font_family=BODY_FONT, margin_bottom="1.5rem",
             ),
             _metricas(),
+            _zerar(),
             _acao(),
+            _progresso(),
             _urgencias(),
             rx.box(height="1.5rem"),
             _configuracao(),
@@ -458,6 +637,48 @@ def dashboard_page() -> rx.Component:
             rx.box(height="1.5rem"),
             _tabela(),
             _detalhe(),
+            confirm_dialog(
+                open_var=DashboardState.confirm_zerar_open,
+                on_open_change=DashboardState.set_confirm_zerar_open,
+                title="Zerar os contadores do painel?",
+                body=(
+                    "Isso apaga TODAS as execuções, os e-mails classificados e os "
+                    "resumos, zerando os indicadores, a lista de urgências e a "
+                    "tabela. Vale para toda a equipe, não só para você.\n\n"
+                    "Nada é desfeito no Outlook: os e-mails já arquivados continuam "
+                    "nas pastas, com as categorias que receberam.\n\n"
+                    "Atenção ao custo: é o registro apagado aqui que impede pagar "
+                    "duas vezes pelo mesmo e-mail. Sem ele, a próxima execução "
+                    "reclassifica tudo o que estiver dentro da janela de varredura "
+                    "e cobra de novo por isso.\n\n"
+                    "A configuração, as pastas vinculadas e o histórico de custo em "
+                    "/admin não são afetados. A ação não pode ser desfeita."
+                ),
+                confirm_label="Zerar contadores",
+                on_confirm=DashboardState.zerar_contadores,
+            ),
+            confirm_dialog(
+                open_var=DashboardState.confirm_excluir_open,
+                on_open_change=DashboardState.set_confirm_excluir_open,
+                title="Excluir este e-mail do banco?",
+                # Concatenação com `+` e não f-string: `excluir_assunto` é um
+                # Var do Reflex, e interpolá-lo numa f-string gravaria o repr do
+                # Var no HTML em vez do assunto.
+                body=(
+                    "Vai sair do painel, da lista de urgências e das respostas "
+                    "da Consulta IA:\n\n"
+                    + DashboardState.excluir_assunto
+                    + "\n\nA mensagem NÃO é apagada do Outlook: ela continua na "
+                    "pasta em que foi arquivada, com as categorias que recebeu."
+                    "\n\nAtenção ao custo: é este registro que impede pagar duas "
+                    "vezes pelo mesmo e-mail. Sem ele, se a mensagem voltar para "
+                    "a caixa de entrada dentro da janela de varredura, ela será "
+                    "reclassificada e cobrada de novo."
+                    "\n\nA ação não pode ser desfeita."
+                ),
+                confirm_label="Excluir do banco",
+                on_confirm=DashboardState.excluir_email,
+            ),
             spacing="0", align_items="start", width="100%",
         )
     )

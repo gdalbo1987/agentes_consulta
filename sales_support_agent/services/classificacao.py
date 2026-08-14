@@ -131,6 +131,28 @@ def _ja_conhecidos(tenant_id: int, ids: list) -> set:
     return {linha[0] for linha in linhas}
 
 
+def _marcar_progresso(run_id: Optional[int], processados: int, total: int) -> None:
+    """Escreve o andamento na linha da rodada, a cada e-mail.
+
+    Sem isto, o progresso só existiria no State do navegador de quem clicou, e
+    a execução AGENDADA rodaria invisível: quem abrisse o painel às 08:01 veria
+    uma tela parada, sem saber que o agente estava trabalhando. Gravar na linha
+    faz o andamento sobreviver a um reload e ficar visível para todo mundo.
+
+    Sessão curta e própria, pelo mesmo motivo do resto do módulo: nada de
+    segurar conexão atravessando chamada de rede.
+    """
+    if not run_id:
+        return
+    with rx.session() as session:
+        rodada = session.get(ClassificacaoRun, run_id)
+        if not rodada:
+            return
+        rodada.processados = processados
+        rodada.total_emails = total
+        session.commit()
+
+
 def _gravar(tenant_id: int, run_id: int, email: dict, resultado: dict, **extra) -> int:
     with rx.session() as session:
         linha = EmailClassificado(
@@ -147,7 +169,9 @@ def _gravar(tenant_id: int, run_id: int, email: dict, resultado: dict, **extra) 
             recebido_em=email["recebido_em"],
             classe=resultado.get("classe", ""),
             urgente=resultado.get("urgente", False),
+            importante=resultado.get("importante", False),
             urgencia_prazo_horas=resultado.get("urgencia_prazo_horas"),
+            urgente_semantico=resultado.get("urgente_semantico", False),
             confianca=resultado.get("confianca", 0),
             justificativa=resultado.get("justificativa", ""),
             status=extra.get("status", "classificado"),
@@ -180,15 +204,22 @@ async def stream_classificacao(
     avisos = []
     resumo = {
         "total_emails": 0, "processados": 0, "classificados": 0, "ignorados": 0,
-        "urgentes": 0, "puladas": 0, "falhas": 0, "resumidos": 0,
+        "urgentes": 0, "importantes": 0, "puladas": 0, "falhas": 0, "resumidos": 0,
         "avisos": avisos, "usage_classificacao": {"input": 0, "output": 0},
         "usage_resumo": {"input": 0, "output": 0},
     }
 
     # 1. Configuração. Falha aqui é ANTES de gastar o primeiro token.
     cfg = classificacao_config.get_config(tenant_id)
-    if not cfg["ativo"]:
-        yield ("error", "A classificação automática está desligada na configuração.")
+    # O interruptor vale só para o AGENDADO. "Classificar agora" é ação
+    # deliberada de uma pessoa que está olhando a tela, e precisa funcionar
+    # justamente quando o automático está parado: é assim que se testa a
+    # configuração antes de ligar o agente para valer.
+    if origem == "agendado" and not cfg["ativo"]:
+        yield (
+            "error",
+            "As execuções automáticas estão paradas. Use o botão Iniciar no painel.",
+        )
         return
 
     pastas = {p["classe"]: p for p in classificacao_config.get_pastas(tenant_id)}
@@ -224,6 +255,7 @@ async def stream_classificacao(
     resumo["puladas"] = len(mensagens) - len(pendentes_msgs)
 
     total = len(pendentes_msgs)
+    _marcar_progresso(run_id, 0, total)
     if not total:
         yield ("progress", 0, 0, f"{resumo['puladas']} e-mail(s) já classificados; nada novo.")
         yield ("done", resumo)
@@ -240,6 +272,7 @@ async def stream_classificacao(
 
     for indice, email in enumerate(pendentes_msgs, start=1):
         assunto = (email.get("assunto") or "(sem assunto)")[:60]
+        _marcar_progresso(run_id, indice - 1, total)
         yield ("progress", indice - 1, total, f"Classificando: {assunto}")
 
         if email.get("sem_internet_message_id"):
@@ -272,6 +305,7 @@ async def stream_classificacao(
         if dry_run:
             resumo["classificados"] += 1
             resumo["urgentes"] += int(resultado["urgente"])
+            resumo["importantes"] += int(resultado.get("importante", False))
             continue
 
         # --- marcar ANTES de mover -----------------------------------------
@@ -283,7 +317,12 @@ async def stream_classificacao(
 
         try:
             await graph_client.aplicar_categorias(
-                graph_id, categorias_para(resultado["classe"], resultado["urgente"])
+                graph_id,
+                categorias_para(
+                    resultado["classe"],
+                    resultado["urgente"],
+                    resultado.get("importante", False),
+                ),
             )
             categoria_ok = True
             graph_id = await graph_client.mover_mensagem(graph_id, destino)
@@ -316,6 +355,7 @@ async def stream_classificacao(
         )
         resumo["classificados"] += 1
         resumo["urgentes"] += int(resultado["urgente"])
+        resumo["importantes"] += int(resultado.get("importante", False))
 
         # --- resumo (Agente 2) ---------------------------------------------
         # Best effort: uma falha aqui não desfaz a classificação, que já moveu
@@ -330,6 +370,7 @@ async def stream_classificacao(
             _gravar_resumo(tenant_id, email_id, None, erro=erro_r)
             avisos.append(f"Não foi possível resumir '{assunto}': {erro_r}")
 
+        _marcar_progresso(run_id, indice, total)
         yield ("progress", indice, total, f"Classificado: {assunto}")
 
     yield ("done", resumo)

@@ -253,12 +253,29 @@ class EmailClassificado(SQLModel, table=True):
     recebido_em: datetime = Field(index=True)
 
     classe: str = Field(default="", index=True)  # "" = nenhuma das 4
+    # Duas faixas de prioridade, mutuamente exclusivas (ver
+    # `classificacao_rules.calcular_prioridade`): urgente é "tem data e ela cai
+    # dentro da janela"; importante é "tem data, mas além da janela". Ter data é
+    # um compromisso assumido, e antes um pedido com entrega em duas semanas
+    # ficava indistinguível de um e-mail sem data nenhuma.
     urgente: bool = Field(default=False, index=True)
-    # Prazo estimado pelo modelo, em horas, guardado SEPARADO do booleano. Com
+    importante: bool = Field(default=False, index=True)
+    # Prazo estimado pelo modelo, em horas, guardado SEPARADO dos booleanos. Com
     # ele na linha, mudar a janela de urgência de 24h para 8h re-marca todos os
     # e-mails já gravados com um UPDATE, a custo zero de token. Só com o
     # booleano, mudar a janela exigiria reprocessar tudo no modelo.
     urgencia_prazo_horas: Optional[int] = None
+    # Persistido junto pelo mesmo motivo: sem ele, o recálculo não conseguia
+    # distinguir "urgente porque a data cabe na janela" de "urgente porque o
+    # texto diz que é", e precisava adivinhar pela ausência de prazo.
+    urgente_semantico: bool = Field(default=False)
+    # Quando alguém tirou o e-mail da FILA de urgências, sem apagá-lo.
+    #
+    # Coluna própria, e não `urgente = False`: a urgência é um fato calculado a
+    # partir do prazo, e o recálculo (ao mudar a janela) a reescreveria,
+    # trazendo de volta o que já tinha sido tratado. "Já cuidei disto" é
+    # decisão de uma pessoa e precisa sobreviver ao recálculo.
+    urgencia_tratada_em: Optional[datetime] = Field(default=None, index=True)
     confianca: int = Field(default=0)  # 0-100
     justificativa: str = Field(default="", sa_column=Column(Text))
 
@@ -325,7 +342,12 @@ class ClassificacaoConfig(SQLModel, table=True):
     lookback_horas: int = Field(default=48)            # janela de leitura no Graph
     max_emails_por_execucao: int = Field(default=200)  # o teto de custo da rodada
 
-    ativo: bool = Field(default=True)
+    # Interruptor das execuções AUTOMÁTICAS, ligado pelo botão "Iniciar" do
+    # `/dashboard`. Nasce DESLIGADO de propósito: configurar os horários não é
+    # o mesmo que autorizar o agente a mexer na caixa, e uma instalação nova
+    # não pode começar a arquivar e-mails sozinha só porque subiu. Não afeta o
+    # botão "Classificar agora", que é ação deliberada de uma pessoa.
+    ativo: bool = Field(default=False)
     # Marca do último disparo AGENDADO, para o mesmo horário não rodar duas
     # vezes no mesmo dia.
     ultima_execucao_agendada: Optional[datetime] = None
