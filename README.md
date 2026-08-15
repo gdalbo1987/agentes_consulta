@@ -44,19 +44,28 @@ painel. O botão "Classificar agora" funciona mesmo com o automático parado, qu
 ## Como rodar
 
 ```bash
+git clone https://github.com/<organizacao>/agentes_consulta.git
+cd agentes_consulta
+
 python -m venv .venv && .venv/Scripts/activate   # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env        # preencha DATABASE_URL, SETTINGS_ENCRYPTION_KEY e OPENAI_API_KEY
 
 python -m reflex db migrate                        # cria o schema
-SUPER_ADMIN_SENHA="uma-senha-forte" python scripts/seed.py
+python scripts/seed.py                             # organização, super admin e configuração
 python -m reflex run --env prod --single-port
 ```
 
 A ordem importa: `migrate` cria as tabelas em que o `seed` escreve, e
 `SETTINGS_ENCRYPTION_KEY` precisa existir antes do `seed`, que já grava cifrada
 a credencial que estiver no `.env`.
+
+O repositório **não carrega credencial nenhuma**: o `.env` está no `.gitignore`,
+e o que é versionado é o `.env.example`, com todos os valores em branco. O
+primeiro super admin sai de `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_NOME` e
+`SUPER_ADMIN_SENHA`, que não têm padrão no código; faltando alguma das
+obrigatórias, o `seed` para e diz qual. Detalhes em `MANUAL.md`, seção 1.4.
 
 Validação rápida sem subir o servidor: `python -m reflex compile --dry`.
 

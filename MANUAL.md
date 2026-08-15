@@ -60,11 +60,31 @@ New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
 
 ## 1.2 Instalação
 
+O código fica no GitHub, no repositório **`agentes_consulta`**.
+
 ```bash
+git clone https://github.com/<organizacao>/agentes_consulta.git
+cd agentes_consulta
+
 python -m venv .venv
 .venv/Scripts/activate            # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+**O repositório não traz nenhuma credencial, e isso é proposital.** O que ele
+tem é o `.env.example`, que é a lista das variáveis com explicação de cada uma e
+todos os valores em branco. Três coisas ficam de fora do clone e precisam ser
+providenciadas em cada ambiente:
+
+| O que falta | Onde vem |
+|---|---|
+| O arquivo `.env` | Você cria a partir do `.env.example`, na seção 1.3 |
+| O banco de dados | PostgreSQL vazio, com o schema aplicado na seção 1.4 |
+| O primeiro super admin | Criado pelo `seed`, também na seção 1.4 |
+
+O `.env` está no `.gitignore` e **nunca** deve ser commitado. Se um dia for
+preciso compartilhar configuração entre duas máquinas, compartilhe o
+`.env.example` preenchido por fora do repositório, nunca pelo Git.
 
 ## 1.3 Configuração
 
@@ -96,13 +116,40 @@ recusa a rodar se as duas forem iguais.
 
 ```bash
 python -m reflex db migrate
-SUPER_ADMIN_SENHA="uma-senha-forte" python scripts/seed.py
+python scripts/seed.py
 ```
 
 O `seed` cria a organização, o primeiro super admin, as linhas de configuração
 dos agentes e as quatro linhas de pasta (com nome sugerido e sem identificador
 ainda). Ele é idempotente: rodar de novo não duplica nada nem sobrescreve uma
 senha já trocada.
+
+**O primeiro super admin sai de três variáveis do `.env`**, e nenhuma delas tem
+valor padrão no código:
+
+| Variável | Obrigatória |
+|---|---|
+| `SUPER_ADMIN_EMAIL` | Sim. Sem ela o `seed` para e explica o que fazer. |
+| `SUPER_ADMIN_NOME` | Não. Faltando, o próprio endereço vira o rótulo até ser editado em `/profile`. |
+| `SUPER_ADMIN_SENHA` | Sim, e **só na primeira execução**, quando há usuário a criar. |
+
+Não há padrão de propósito. Um e-mail embutido no código publicaria o endereço
+de uma pessoa no repositório e, pior, criaria em silêncio um super admin com a
+identidade de alguém de outra empresa numa instalação em que a variável ficasse
+por preencher. Uma senha embutida seria uma credencial publicada, e uma senha
+genérica ("admin", "changeme") viraria a senha de produção de quem esquecesse de
+trocá-la.
+
+Só o hash bcrypt vai para o banco; a senha em texto puro não é gravada em lugar
+nenhum. Se preferir não deixá-la em arquivo, passe na hora:
+
+```bash
+SUPER_ADMIN_SENHA="uma-senha-forte" python scripts/seed.py
+```
+
+**Troque a senha no primeiro acesso, em `/profile`, e apague a
+`SUPER_ADMIN_SENHA` do `.env` depois.** Ela não é mais lida: da segunda execução
+em diante o `seed` encontra o usuário e nunca reescreve a senha dele.
 
 Rodar o `seed` de novo também é o caminho de **resgate** quando a organização
 fica sem super admin: a permissão é restaurada sem tocar na senha.

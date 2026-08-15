@@ -15,7 +15,16 @@ trocada pelo usuário. Rodá-lo de novo também é o caminho de RESGATE quando a
 organização fica sem super admin (um super admin pode se rebaixar sozinho em
 `/admin`): a permissão é restaurada sem tocar na senha.
 
-    SUPER_ADMIN_SENHA="uma-senha-forte" python scripts/seed.py
+A identidade do super admin vem TODA do ambiente, sem padrão nenhum no código.
+Basta preencher `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_NOME` e `SUPER_ADMIN_SENHA` no
+`.env` (ver `.env.example`) e rodar:
+
+    python scripts/seed.py
+
+Ou passando na hora, sem gravar a senha em arquivo:
+
+    SUPER_ADMIN_EMAIL="voce@empresa.com.br" SUPER_ADMIN_SENHA="uma-senha-forte" \
+        python scripts/seed.py
 """
 
 import os
@@ -35,19 +44,30 @@ from sales_support_agent.models import Tenant, User  # noqa: E402
 
 ORGANIZACAO = "Coester"
 
-# Identidade do primeiro super admin. Vem do ambiente para o script não carregar
-# o nome de uma pessoa específica — em outra instalação basta trocar o `.env`.
-SUPER_ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "giuliano@coester.com.br")
-SUPER_ADMIN_NOME = os.environ.get("SUPER_ADMIN_NOME", "Giuliano Dal Bó")
-
-# A senha inicial NÃO tem valor padrão, de propósito. Ela é lida de
-# `SUPER_ADMIN_SENHA` e só é usada para gerar o hash bcrypt gravado no banco —
-# em texto puro ela não vai para lugar nenhum. Deixar um default aqui
-# publicaria uma credencial real no repositório, e um default genérico
-# ("admin", "changeme") seria pior ainda: viraria a senha de produção de quem
-# esquecesse de definir a variável. Sem a variável, o seed para e diz o que
-# fazer. Troque a senha no primeiro acesso em /profile.
+# NENHUMA das três tem valor padrão, e isso é deliberado.
+#
+# A senha, pelo motivo evidente: um default publicaria uma credencial real no
+# repositório, e um default genérico ("admin", "changeme") seria pior ainda,
+# porque viraria a senha de produção de quem esquecesse de definir a variável.
+# Em texto puro ela não vai a lugar nenhum: serve só para gerar o hash bcrypt.
+#
+# O e-mail e o nome, porque este arquivo é versionado e público. Um default com
+# a pessoa da primeira instalação faria duas coisas ruins: publicaria o endereço
+# dela no repositório, e, numa instalação nova em que a variável ficasse por
+# preencher, criaria silenciosamente um super admin com a identidade de alguém
+# de outra empresa. Sem as variáveis, o seed para e diz exatamente o que fazer.
+SUPER_ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "").strip()
+SUPER_ADMIN_NOME = os.environ.get("SUPER_ADMIN_NOME", "").strip()
 SUPER_ADMIN_SENHA = os.environ.get("SUPER_ADMIN_SENHA", "")
+
+_ERRO_SEM_EMAIL = (
+    "SUPER_ADMIN_EMAIL não configurada. É o endereço do primeiro super admin, "
+    "o único usuário criado fora do fluxo de convite.\n"
+    "Defina no .env (ou na variável de ambiente do deploy) e rode de novo:\n"
+    '    SUPER_ADMIN_EMAIL="voce@suaempresa.com.br"\n'
+    '    SUPER_ADMIN_NOME="Seu Nome"\n'
+    '    SUPER_ADMIN_SENHA="uma-senha-forte"'
+)
 
 _ERRO_SEM_SENHA = (
     "SUPER_ADMIN_SENHA não configurada. É a senha inicial do primeiro super "
@@ -63,6 +83,8 @@ def main() -> None:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise SystemExit("DATABASE_URL não configurada no .env.")
+    if not SUPER_ADMIN_EMAIL:
+        raise SystemExit(_ERRO_SEM_EMAIL)
 
     engine = create_engine(database_url)
     with Session(engine) as session:
@@ -106,7 +128,11 @@ def main() -> None:
             session.add(
                 User(
                     email=SUPER_ADMIN_EMAIL,
-                    name=SUPER_ADMIN_NOME,
+                    # O nome é cosmético (aparece no cabeçalho e na gestão de
+                    # usuários), então a falta dele não justifica abortar um
+                    # deploy: o endereço serve de rótulo até ser editado em
+                    # /profile.
+                    name=SUPER_ADMIN_NOME or SUPER_ADMIN_EMAIL,
                     hashed_password=hashed,
                     tenant_id=tenant.id,
                     is_superadmin=True,
