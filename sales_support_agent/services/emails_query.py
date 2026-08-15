@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 import reflex as rx
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from sales_support_agent.models import (
     ClassificacaoRun,
@@ -215,6 +215,7 @@ def listar_emails(
     data_inicio: str = "",
     data_fim: str = "",
     apenas_urgentes: bool = False,
+    apenas_importantes: bool = False,
     classe: str = "",
     limite: int = 200,
 ) -> List[dict]:
@@ -222,6 +223,12 @@ def listar_emails(
 
     O fim vira 23:59:59 do dia informado: filtrar "até 07/08" e não ver o que
     chegou às 15h do dia 7 seria surpreendente para quem usa.
+
+    Os dois filtros de prioridade combinam por OU, e não por E. As faixas são
+    mutuamente exclusivas (`calcular_prioridade` devolve uma ou outra, nunca as
+    duas), então intersectá-las devolveria lista vazia SEMPRE, e quem ligasse os
+    dois interruptores concluiria que não há e-mail nenhum. Com os dois ligados,
+    a leitura útil é "tudo o que tem alguma prioridade".
     """
     with rx.session() as session:
         consulta = _base(session, tenant_id)
@@ -232,8 +239,17 @@ def listar_emails(
             consulta = consulta.filter(
                 EmailClassificado.recebido_em <= _dia(data_fim, fim_do_dia=True)
             )
-        if apenas_urgentes:
+        if apenas_urgentes and apenas_importantes:
+            consulta = consulta.filter(
+                or_(
+                    EmailClassificado.urgente.is_(True),
+                    EmailClassificado.importante.is_(True),
+                )
+            )
+        elif apenas_urgentes:
             consulta = consulta.filter(EmailClassificado.urgente.is_(True))
+        elif apenas_importantes:
+            consulta = consulta.filter(EmailClassificado.importante.is_(True))
         if classe:
             consulta = consulta.filter(EmailClassificado.classe == classe)
 

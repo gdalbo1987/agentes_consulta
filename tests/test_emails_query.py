@@ -173,6 +173,31 @@ def test_filtro_de_urgentes(base):
     assert [e["assunto"] for e in achados] == ["Urgente"]
 
 
+def test_filtro_de_importantes(base):
+    _email(base, assunto="Urgente", imid="<1@t>", urgente=True)
+    _email(base, assunto="Importante", imid="<2@t>", importante=True)
+    _email(base, assunto="Normal", imid="<3@t>")
+
+    achados = emails_query.listar_emails(TENANT, apenas_importantes=True)
+    assert [e["assunto"] for e in achados] == ["Importante"]
+
+
+def test_os_dois_filtros_de_prioridade_juntos_combinam_por_ou(base):
+    """As faixas são exclusivas: por E, ligar os dois devolveria SEMPRE vazio.
+
+    E quem ligasse os dois interruptores concluiria que não há e-mail nenhum,
+    quando a leitura útil é "tudo o que tem alguma prioridade".
+    """
+    _email(base, assunto="Urgente", imid="<1@t>", urgente=True)
+    _email(base, assunto="Importante", imid="<2@t>", importante=True)
+    _email(base, assunto="Normal", imid="<3@t>")
+
+    achados = emails_query.listar_emails(
+        TENANT, apenas_urgentes=True, apenas_importantes=True
+    )
+    assert {e["assunto"] for e in achados} == {"Urgente", "Importante"}
+
+
 def test_ordenacao_e_mais_recente_primeiro(base):
     _email(base, assunto="Antigo", imid="<1@t>", recebido_em=datetime(2026, 8, 1, 9, 0))
     _email(base, assunto="Novo", imid="<2@t>", recebido_em=datetime(2026, 8, 7, 9, 0))

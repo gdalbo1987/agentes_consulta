@@ -554,6 +554,7 @@ class DashboardState(AppState):
     filtro_data_inicio: str = ""
     filtro_data_fim: str = ""
     filtro_apenas_urgentes: bool = False
+    filtro_apenas_importantes: bool = False
 
     # --- diálogo de detalhe ---
     detalhe_aberto: bool = False
@@ -601,6 +602,10 @@ class DashboardState(AppState):
         self.filtro_apenas_urgentes = value
         return DashboardState.carregar_tabela
 
+    def set_filtro_apenas_importantes(self, value: bool):
+        self.filtro_apenas_importantes = value
+        return DashboardState.carregar_tabela
+
     def set_pasta_input(self, classe: str, value: str):
         self.pasta_inputs[classe] = value
 
@@ -617,6 +622,7 @@ class DashboardState(AppState):
         self.filtro_data_inicio = ""
         self.filtro_data_fim = ""
         self.filtro_apenas_urgentes = False
+        self.filtro_apenas_importantes = False
         return DashboardState.carregar_tabela
 
     # ------------------------------------------------------- load
@@ -712,6 +718,7 @@ class DashboardState(AppState):
                 data_inicio=self.filtro_data_inicio,
                 data_fim=self.filtro_data_fim,
                 apenas_urgentes=self.filtro_apenas_urgentes,
+                apenas_importantes=self.filtro_apenas_importantes,
             )
         ]
         self.urgentes = [_ui(d) for d in emails_query.urgencias(self.tenant_id, limite=10)]

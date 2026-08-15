@@ -216,6 +216,11 @@ com entrega marcada para daqui a duas semanas ficava indistinguível de um
 e-mail sem compromisso nenhum, e só reaparecia quando já era tarde. Estreitar a
 janela **rebaixa** de urgente para importante, e nunca apaga a prioridade.
 
+Como as faixas são exclusivas, os dois interruptores do painel ("Apenas
+urgentes" e "Apenas importantes") combinam por **OU** em `listar_emails`, e não
+por E. Intersectá-las devolveria lista vazia SEMPRE, e quem ligasse os dois
+concluiria que não há e-mail nenhum.
+
 `urgente_semantico` precisa estar na linha porque, sem ele, o recálculo
 adivinhava pela ausência de prazo e não sabia distinguir "urgente porque a data
 cabe" de "urgente porque o texto diz". A migration que criou a coluna traz um

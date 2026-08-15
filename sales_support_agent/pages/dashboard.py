@@ -373,7 +373,7 @@ def _urgencias() -> rx.Component:
                                     variant="soft", color_scheme="green",
                                     size="1", cursor="pointer",
                                 ),
-                                content="Já tratei: tirar das urgências (não apaga)",
+                                content="Remover das urgências",
                             ),
                             width="100%", align_items="center", spacing="2",
                         ),
@@ -461,6 +461,14 @@ def _tabela() -> rx.Component:
                 rx.switch(
                     checked=DashboardState.filtro_apenas_urgentes,
                     on_change=DashboardState.set_filtro_apenas_urgentes,
+                ),
+                spacing="0", align_items="start",
+            ),
+            rx.vstack(
+                _rotulo("Apenas importantes"),
+                rx.switch(
+                    checked=DashboardState.filtro_apenas_importantes,
+                    on_change=DashboardState.set_filtro_apenas_importantes,
                 ),
                 spacing="0", align_items="start",
             ),

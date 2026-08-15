@@ -61,7 +61,8 @@ def test_campos_de_formulario_do_dashboard_tem_setter():
     for campo in (
         "set_horario_1", "set_horario_2", "set_janela_urgencia_horas",
         "set_lookback_horas", "set_filtro_data_inicio", "set_filtro_data_fim",
-        "set_filtro_apenas_urgentes", "set_pasta_input", "set_detalhe_aberto",
+        "set_filtro_apenas_urgentes", "set_filtro_apenas_importantes",
+        "set_pasta_input", "set_detalhe_aberto",
     ):
         assert campo in declarados, f"falta o setter {campo} no DashboardState"
 
