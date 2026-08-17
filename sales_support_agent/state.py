@@ -572,6 +572,17 @@ class DashboardState(AppState):
     # outro vê. Sem esta autoria na tela, quem abrisse o painel encontraria
     # horários que não reconhece sem saber se um colega mudou.
     config_autoria: str = ""
+    # Versão da configuração NO MOMENTO em que esta tela a carregou. Vai junto
+    # ao salvar: se a linha no banco estiver mais nova, alguém gravou no meio e
+    # a tela está prestes a desfazer o trabalho dessa pessoa. Começa em -1, que
+    # é "esta tela ainda não leu nada" e desliga a checagem.
+    config_versao: int = -1
+    # Alguém alterou a configuração enquanto esta tela estava aberta. A tela
+    # AVISA e não se atualiza sozinha: sobrescrever os campos apagaria o que o
+    # usuário estivesse digitando naquele instante, o que trocaria um problema
+    # silencioso por outro.
+    config_desatualizada: bool = False
+    config_aviso: str = ""
     # Interruptor do AGENDADO. Não desabilita "Classificar agora".
     agendamento_ativo: bool = False
     confirm_zerar_open: bool = False
@@ -674,16 +685,7 @@ class DashboardState(AppState):
         classificacao_config.ensure_config(self.tenant_id)
         classificacao_config.ensure_pastas(self.tenant_id)
 
-        cfg = classificacao_config.get_config(self.tenant_id)
-        self.horario_1 = cfg["horario_1"]
-        self.horario_2 = cfg["horario_2"]
-        self.janela_urgencia_horas = str(cfg["janela_urgencia_horas"])
-        self.lookback_horas = str(cfg["lookback_horas"])
-        self.agendamento_ativo = cfg["ativo"]
-        self.config_autoria = _autoria_config(cfg)
-
-        proxima = classificacao_config.proxima_execucao(brt_now(), cfg)
-        self.proxima_execucao = proxima.strftime("%d/%m/%Y %H:%M") if proxima else "-"
+        self._aplicar_config(classificacao_config.get_config(self.tenant_id))
 
         self.pastas = [
             PastaUI(
@@ -701,6 +703,46 @@ class DashboardState(AppState):
         self.is_running = classificacao.ha_rodada_em_andamento(self.tenant_id)
         self._carregar_metricas()
         self.carregar_tabela()
+
+    def _aplicar_config(self, cfg: dict):
+        """Joga a configuração do banco nos campos da tela.
+
+        Um lugar só, usado pelo carregamento da página e pelo botão de
+        recarregar. Duplicar isto deixaria o botão fora de sincronia com o
+        `on_load` no dia em que um campo novo aparecesse.
+        """
+        from sales_support_agent.services import classificacao_config
+
+        self.horario_1 = cfg["horario_1"]
+        self.horario_2 = cfg["horario_2"]
+        self.janela_urgencia_horas = str(cfg["janela_urgencia_horas"])
+        self.lookback_horas = str(cfg["lookback_horas"])
+        self.agendamento_ativo = cfg["ativo"]
+        self.config_autoria = _autoria_config(cfg)
+
+        self.config_versao = int(cfg.get("versao", 0))
+        # A tela acabou de ler o estado corrente, então não há mais nada
+        # pendente para avisar.
+        self.config_desatualizada = False
+        self.config_aviso = ""
+
+        proxima = classificacao_config.proxima_execucao(brt_now(), cfg)
+        self.proxima_execucao = proxima.strftime("%d/%m/%Y %H:%M") if proxima else "-"
+
+    def recarregar_configuracao(self):
+        """Botão do aviso "outra pessoa alterou".
+
+        Deliberadamente manual. A sondagem percebe a mudança e avisa, mas quem
+        decide trocar o que está na tela é o usuário: fazer isso sozinho
+        apagaria o que ele estivesse digitando naquele instante.
+        """
+        from sales_support_agent.services import classificacao_config
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        self._aplicar_config(classificacao_config.get_config(self.tenant_id))
+        return toast_success("Configuração recarregada.")
 
     def _carregar_metricas(self):
         from sales_support_agent.services import emails_query
@@ -821,15 +863,25 @@ class DashboardState(AppState):
         if janela < 1 or lookback < 1:
             return toast_error("A janela de urgência e o lookback precisam ser maiores que zero.")
 
-        classificacao_config.salvar_config(
-            self.tenant_id,
-            autor_nome=self.user_name,
-            autor_email=self.user_email,
-            horario_1=self.horario_1,
-            horario_2=self.horario_2,
-            janela_urgencia_horas=janela,
-            lookback_horas=lookback,
-        )
+        # Este é o único handler que devolve a tela INTEIRA ao banco, então é o
+        # único que pode desfazer o trabalho de outra pessoa sem querer. Daí o
+        # carimbo: se a linha mudou desde que esta tela carregou, a gravação é
+        # recusada e o usuário recarrega antes de decidir.
+        try:
+            classificacao_config.salvar_config(
+                self.tenant_id,
+                autor_nome=self.user_name,
+                autor_email=self.user_email,
+                versao_esperada=self.config_versao,
+                horario_1=self.horario_1,
+                horario_2=self.horario_2,
+                janela_urgencia_horas=janela,
+                lookback_horas=lookback,
+            )
+        except classificacao_config.ConfiguracaoDesatualizada as conflito:
+            self.config_desatualizada = True
+            self.config_aviso = conflito.mensagem
+            return toast_error(conflito.mensagem)
 
         # Mudar a janela re-marca os e-mails JÁ classificados, com um UPDATE.
         # É para isso que o prazo em horas fica guardado separado do booleano:
@@ -1026,6 +1078,11 @@ class DashboardState(AppState):
     async def monitorar_execucao(self):
         """Acompanha a rodada pelo BANCO, para o automático aparecer na tela.
 
+        Acompanha também o CARIMBO da configuração, pelo mesmo motivo de fundo:
+        a configuração é da organização e outro usuário pode trocá-la enquanto
+        esta tela está aberta. O laço avisa; trocar os campos é decisão de quem
+        está na frente da tela (ver `recarregar_configuracao`).
+
         A execução agendada roda noutro processo e nunca toca o State de
         ninguém: sem esta sondagem, quem tem o painel aberto às 08:00 não vê
         barra de progresso, não vê aviso de conclusão e continua olhando a lista
@@ -1036,7 +1093,7 @@ class DashboardState(AppState):
         """
         import asyncio
 
-        from sales_support_agent.services import emails_query
+        from sales_support_agent.services import classificacao_config, emails_query
 
         async with self:
             if self._monitorando:
@@ -1051,7 +1108,23 @@ class DashboardState(AppState):
             fim = brt_now() + timedelta(hours=4)
             while brt_now() < fim:
                 progresso = emails_query.progresso_execucao(tenant_id)
+                carimbo = classificacao_config.carimbo_config(tenant_id)
                 terminou = False
+
+                async with self:
+                    # Só avisa quem já tinha lido alguma coisa: sem versão de
+                    # partida não há como saber que houve mudança, e o aviso
+                    # apareceria no primeiro carregamento de toda tela.
+                    if (
+                        self.config_versao >= 0
+                        and carimbo["versao"] != self.config_versao
+                    ):
+                        quem = carimbo["nome"] or carimbo["email"] or "Outro usuário"
+                        self.config_desatualizada = True
+                        self.config_aviso = (
+                            f"{quem} alterou a configuração das execuções. O que "
+                            "está nos campos abaixo é o que você carregou antes."
+                        )
 
                 async with self:
                     if progresso["em_andamento"]:

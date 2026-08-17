@@ -333,6 +333,33 @@ O disparo automático **não** conta como alteração: ele escreve na mesma
 configuração duas vezes por dia para marcar que já rodou, mas não vira "alterado
 por" nem mexe na data exibida.
 
+#### Quando duas pessoas mexem ao mesmo tempo
+
+A tela **não** se atualiza sozinha quando um colega salva. É de propósito:
+trocar os campos no meio da digitação apagaria o que você está escrevendo.
+
+O que acontece é isto:
+
+1. Aparece um aviso amarelo em cima dos campos, dizendo quem alterou, com o
+   botão **"Recarregar configuração"**. Só ele troca o que está na tela, e só
+   quando você clicar.
+2. Se você salvar sem recarregar, a gravação é **recusada**, com uma mensagem
+   nomeando quem alterou e quando.
+
+A recusa é o ponto importante. Sem ela, quem estivesse com o painel aberto
+desde antes gravaria os valores velhos que ainda estão na tela e desfaria, em
+silêncio, o que o colega acabou de configurar. Pior, a linha de autoria passaria
+a creditar a pessoa errada, e a única pista seria alguém reparar depois que o
+horário voltou sozinho.
+
+Ao ver o aviso, recarregue, confira se a configuração do colega serve, e só
+então mude o que você precisava mudar.
+
+Os botões **Iniciar** e **Parar** não são recusados nunca, mesmo com o aviso na
+tela. Eles mexem num interruptor só e não têm como desfazer horário nenhum, e
+travar um "Parar" por causa de uma tela velha impediria alguém de frear o agente
+pelo motivo errado.
+
 ### Pastas do Outlook
 
 Uma linha por classe. Você digita o **nome** da pasta e clica em "Vincular"; o

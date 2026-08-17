@@ -278,6 +278,113 @@ def test_o_disparo_agendado_nao_se_passa_por_quem_configurou(banco_agendador):
     assert depois["ultima_execucao_agendada"] is not None
 
 
+# ---------------------------------------------------------------------------
+# Dois usuários editando a mesma configuração
+# ---------------------------------------------------------------------------
+
+
+def _versao(tenant=1) -> int:
+    return classificacao_config.carimbo_config(tenant)["versao"]
+
+
+def test_a_versao_nao_depende_da_resolucao_do_relogio(banco_agendador):
+    """Duas gravações no MESMO segundo têm de ser distinguíveis.
+
+    `brt_now()` trunca em segundos inteiros, então o `updated_at` das duas sai
+    idêntico. Uma trava baseada nele passaria batido justamente na corrida que
+    ela existe para pegar, e pareceria funcionar em todo teste mais lento.
+    """
+    classificacao_config.salvar_config(1, autor_nome="Ana", autor_email="a@x.com")
+    primeira = classificacao_config.get_config(1)
+
+    classificacao_config.salvar_config(1, autor_nome="Bruno", autor_email="b@x.com")
+    segunda = classificacao_config.get_config(1)
+
+    assert segunda["versao"] > primeira["versao"]
+
+
+def test_salvar_com_a_versao_atual_passa(banco_agendador):
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com", horario_1="09:00"
+    )
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com",
+        versao_esperada=_versao(), horario_1="09:30",
+    )
+
+    assert classificacao_config.get_config(1)["horario_1"] == "09:30"
+
+
+def test_salvar_com_versao_velha_e_recusado(banco_agendador):
+    """O lost update: B tem o painel aberto desde antes e salva por cima de A.
+
+    Sem esta recusa, o horário de A voltaria ao valor que estava na tela de B,
+    e a linha de autoria creditaria B por um valor que ele nunca escolheu. A
+    única pista seria alguém reparar que o horário voltou sozinho.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Bruno", autor_email="bruno@x.com", horario_1="08:00"
+    )
+    versao_de_b = _versao()  # B carregou o painel aqui
+
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com", horario_1="09:00"
+    )
+
+    with pytest.raises(classificacao_config.ConfiguracaoDesatualizada) as erro:
+        classificacao_config.salvar_config(
+            1, autor_nome="Bruno", autor_email="bruno@x.com",
+            versao_esperada=versao_de_b, horario_1="08:00",
+        )
+
+    assert "Ana" in erro.value.mensagem
+    # E, o que mais importa: o que Ana gravou continua de pé.
+    cfg = classificacao_config.get_config(1)
+    assert cfg["horario_1"] == "09:00"
+    assert cfg["atualizado_por_nome"] == "Ana"
+
+
+def test_sem_versao_esperada_a_gravacao_nao_e_checada(banco_agendador):
+    """Iniciar e Parar gravam um campo só e não podem ser recusados.
+
+    Eles não têm como desfazer horário nenhum, e barrar um "Parar" por causa de
+    um carimbo velho impediria alguém de frear o agente pelo motivo errado.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com", horario_1="09:00"
+    )
+    classificacao_config.salvar_config(
+        1, autor_nome="Bruno", autor_email="bruno@x.com", ativo=True
+    )
+
+    cfg = classificacao_config.get_config(1)
+    assert cfg["ativo"] is True
+    assert cfg["horario_1"] == "09:00", "o Iniciar mexeu num campo que não é dele"
+
+
+def test_o_disparo_agendado_nao_invalida_a_tela_de_quem_esta_editando(banco_agendador):
+    """A rodada automática não pode transformar a tela de ninguém em desatualizada.
+
+    Ela escreve na mesma linha duas vezes por dia. Se mexesse na versão, todo
+    painel aberto passaria a acusar "outra pessoa alterou" às 08:00 e às 16:00,
+    e a recusa ao salvar viraria um obstáculo diário sem nenhuma alteração real
+    por trás.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com", horario_1="09:00"
+    )
+    versao = _versao()
+
+    classificacao_config.marcar_execucao_agendada(1)
+
+    assert _versao() == versao
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com",
+        versao_esperada=versao, horario_1="10:00",
+    )
+    assert classificacao_config.get_config(1)["horario_1"] == "10:00"
+
+
 def test_o_agendador_sobe_pelo_lifespan_e_nao_no_import():
     """A distinção que impede `reflex compile` de levantar um agendador.
 

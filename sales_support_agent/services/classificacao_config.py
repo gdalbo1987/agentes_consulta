@@ -22,6 +22,37 @@ from sales_support_agent.models import ClassificacaoConfig, PastaClasse, brt_now
 from sales_support_agent.services.classificacao_rules import CLASSES, PASTAS_PADRAO
 
 
+class ConfiguracaoDesatualizada(Exception):
+    """Alguém salvou a configuração depois que esta tela a carregou.
+
+    A configuração é da ORGANIZAÇÃO e a tela guarda os valores em campos de
+    formulário. Sem esta checagem, um usuário com o painel aberto desde antes
+    salvaria os valores VELHOS que ainda estão na tela dele e desfaria, em
+    silêncio, o que o colega acabou de gravar. Pior: a linha de autoria passaria
+    a creditá-lo por um valor que ele nunca escolheu, e a única pista seria
+    alguém reparar que o horário voltou sozinho.
+    """
+
+    def __init__(self, autor: str, quando: Optional[datetime]):
+        self.autor = autor
+        self.quando = quando
+        super().__init__(self.mensagem)
+
+    @property
+    def mensagem(self) -> str:
+        quem = self.autor or "Outro usuário"
+        if self.quando:
+            return (
+                f"{quem} alterou esta configuração em "
+                f"{self.quando.strftime('%d/%m/%Y às %H:%M')}. Recarregue antes "
+                "de salvar, para não desfazer o que a pessoa gravou."
+            )
+        return (
+            f"{quem} alterou esta configuração depois que esta tela carregou. "
+            "Recarregue antes de salvar."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Configuração geral
 # ---------------------------------------------------------------------------
@@ -67,6 +98,30 @@ def get_config(tenant_id: int) -> dict:
             "atualizado_por_nome": linha.atualizado_por_nome or "",
             "atualizado_por_email": linha.atualizado_por_email or "",
             "updated_at": linha.updated_at,
+            "versao": int(linha.versao or 0),
+        }
+
+
+def carimbo_config(tenant_id: int) -> dict:
+    """Só quem alterou por último e quando. Uma linha, três colunas.
+
+    Existe separado de `get_config` porque a sondagem do painel chama isto a
+    cada poucos segundos, em toda aba aberta, e só para comparar o carimbo. Ler
+    a configuração inteira para descartar tudo menos a data seria desperdício
+    multiplicado pelo número de telas abertas.
+    """
+    with rx.session() as session:
+        linha = (
+            session.query(ClassificacaoConfig)
+            .filter(ClassificacaoConfig.tenant_id == tenant_id)
+            .first()
+        )
+        if not linha:
+            return {"versao": 0, "nome": "", "email": ""}
+        return {
+            "versao": int(linha.versao or 0),
+            "nome": linha.atualizado_por_nome or "",
+            "email": linha.atualizado_por_email or "",
         }
 
 
@@ -75,6 +130,7 @@ def salvar_config(
     *,
     autor_nome: str = "",
     autor_email: str = "",
+    versao_esperada: int = -1,
     **campos,
 ) -> None:
     """Grava só os campos passados (chave ausente não é tocada).
@@ -90,6 +146,22 @@ def salvar_config(
     quem configurou apontaria para uma alteração que ninguém fez. O disparo
     agendado tem a coluna própria dele, `ultima_execucao_agendada`, então nada
     se perde ao deixar este carimbo para as edições de gente.
+
+    `versao_esperada` é a versão que a tela leu ao carregar. Quando informada
+    (>= 0), a gravação só acontece se a linha ainda estiver nela; caso
+    contrário levanta `ConfiguracaoDesatualizada`. A comparação e a escrita
+    ficam na MESMA sessão de propósito: checar numa sessão e gravar noutra
+    deixaria aberta exatamente a janela que a checagem existe para fechar.
+
+    É um contador e não o `updated_at` porque `brt_now()` trunca em segundos
+    inteiros: duas gravações no mesmo segundo carimbam o mesmo horário, e a
+    trava passaria batido justo na corrida real.
+
+    Só quem envia a tela inteira de volta precisa passar `versao_esperada`. Os
+    botões Iniciar e Parar não passam, e não é esquecimento: eles gravam um
+    campo só (`ativo`), então não têm como desfazer horário nenhum, e recusar
+    um "Parar" por causa de uma versão velha seria impedir alguém de frear o
+    agente pelo motivo errado.
     """
     with rx.session() as session:
         linha = (
@@ -100,6 +172,11 @@ def salvar_config(
         if not linha:
             linha = ClassificacaoConfig(tenant_id=tenant_id)
             session.add(linha)
+        elif versao_esperada >= 0 and int(linha.versao or 0) != versao_esperada:
+            raise ConfiguracaoDesatualizada(
+                linha.atualizado_por_nome or linha.atualizado_por_email,
+                linha.updated_at,
+            )
 
         for chave, valor in campos.items():
             setattr(linha, chave, valor)
@@ -108,6 +185,7 @@ def salvar_config(
             linha.atualizado_por_nome = autor_nome
             linha.atualizado_por_email = autor_email
             linha.updated_at = brt_now()
+            linha.versao = int(linha.versao or 0) + 1
         session.commit()
 
 

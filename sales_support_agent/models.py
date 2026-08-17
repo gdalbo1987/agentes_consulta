@@ -366,6 +366,16 @@ class ClassificacaoConfig(SQLModel, table=True):
     atualizado_por_nome: str = Field(default="")
     atualizado_por_email: str = Field(default="")
 
+    # Contador de edições HUMANAS, usado para detectar que dois usuários
+    # editaram a mesma configuração (ver `classificacao_config.salvar_config`).
+    #
+    # É um contador, e não o `updated_at`, porque `brt_now()` trunca em segundos
+    # inteiros: duas gravações no mesmo segundo carimbam o MESMO horário, e uma
+    # trava baseada nele passaria despercebida exatamente na corrida que ela
+    # existe para pegar. O contador é exato e monotônico, sem depender da
+    # resolução do relógio.
+    versao: int = Field(default=0)
+
 
 class PastaClasse(SQLModel, table=True):
     """Mapa classe -> pasta do Outlook. O usuário informa o NOME; o backend

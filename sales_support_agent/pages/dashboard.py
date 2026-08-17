@@ -208,9 +208,41 @@ def _progresso() -> rx.Component:
     )
 
 
+def _aviso_config_desatualizada() -> rx.Component:
+    """Outra pessoa mudou a configuração enquanto esta tela estava aberta.
+
+    Aparece ACIMA dos campos, e não como toast, porque o toast some e a
+    divergência continua: quem chega depois precisa ver que o que está na tela
+    não é mais o que está valendo. O botão é a única forma de trocar os campos,
+    de propósito, para não apagar o que a pessoa estiver digitando.
+    """
+    return rx.cond(
+        DashboardState.config_desatualizada,
+        rx.callout(
+            rx.hstack(
+                rx.text(
+                    DashboardState.config_aviso, size="2", font_family=BODY_FONT,
+                ),
+                rx.spacer(),
+                rx.button(
+                    rx.icon(tag="refresh-cw", size=14),
+                    "Recarregar configuração",
+                    on_click=DashboardState.recarregar_configuracao,
+                    variant="soft", color_scheme="amber", cursor="pointer", size="2",
+                    flex_shrink="0",
+                ),
+                width="100%", align_items="center", spacing="3", wrap="wrap",
+            ),
+            icon="triangle-alert", color_scheme="amber",
+            width="100%", margin_bottom="1rem",
+        ),
+    )
+
+
 def _configuracao() -> rx.Component:
     return _cartao(
         "Execuções automáticas e urgência",
+        _aviso_config_desatualizada(),
         rx.grid(
             rx.vstack(
                 _rotulo("Primeiro horário"),

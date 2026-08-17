@@ -41,6 +41,17 @@ exige pedido explícito do usuário.
    na mesma linha duas vezes por dia, e se empurrasse o carimbo o painel
    atribuiria a um usuário uma alteração que ninguém fez.
 
+   Como a tela guarda os valores em campos de formulário, salvar exige a
+   `versao` lida no carregamento (`ConfiguracaoDesatualizada`): sem isso, quem
+   tem o painel aberto desde antes regravaria os valores velhos e desfaria em
+   silêncio o que o colega salvou, com a autoria creditando a pessoa errada. A
+   versão é um CONTADOR e não o `updated_at` porque `brt_now()` trunca em
+   segundos inteiros, e duas gravações no mesmo segundo carimbam o mesmo
+   horário: a trava passaria batido justo na corrida que ela existe para pegar.
+   A sondagem do painel avisa, mas **não** troca os campos sozinha, para não
+   apagar o que a pessoa está digitando. Iniciar e Parar não passam versão, de
+   propósito: gravam só `ativo` e não podem desfazer horário nenhum.
+
 4. **Quatro classes, e só quatro:** `pedido`, `proposta`, `revisao_pedido`,
    `revisao_proposta` (`services/classificacao_rules.CLASSES`). E-mail que não se
    encaixa em nenhuma delas **não recebe marcação e não é movido**: ele fica
