@@ -253,11 +253,31 @@ def _configuracao() -> rx.Component:
             "já classificados, sem reprocessá-los.",
             size="1", color=colors.TEXT_SEC, font_family=BODY_FONT, margin_top="0.75rem",
         ),
+        rx.text(
+            "Esta configuração é da organização: ela vale para todos e o que "
+            "um usuário salvar os demais passam a ver.",
+            size="1", color=colors.TEXT_SEC, font_family=BODY_FONT,
+            margin_top="0.35rem",
+        ),
         rx.button(
             "Salvar configuração",
             on_click=DashboardState.salvar_configuracao,
             background=colors.BTN_GRADIENT, color="white", cursor="pointer",
             margin_top="1rem",
+        ),
+        # Só aparece depois que alguém salvou. Numa instalação que vem de antes
+        # do registro de autoria não há o que mostrar, e uma linha vazia dizendo
+        # "alterado por -" seria pior que silêncio.
+        rx.cond(
+            DashboardState.config_autoria != "",
+            rx.hstack(
+                rx.icon(tag="user-round", size=13, color=colors.TEXT_SEC),
+                rx.text(
+                    DashboardState.config_autoria, size="1", color=colors.TEXT_SEC,
+                    font_family=BODY_FONT,
+                ),
+                spacing="2", align_items="center", margin_top="0.75rem",
+            ),
         ),
     )
 

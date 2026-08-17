@@ -105,11 +105,14 @@ def banco_agendador(engine, monkeypatch):
     # `finalizar_rodada` grava TokenUsage e ActivityLog junto com a rodada, então
     # os três entram na limpeza. Sem isso, um teste que conta logs veria também
     # os dos testes anteriores, já que estes comitam num banco compartilhado.
-    from sales_support_agent.models import ActivityLog, TokenUsage
+    # `ClassificacaoConfig` entra na limpeza porque os testes de autoria
+    # gravam nela. Sem isso, um horário deixado aqui apareceria como estado
+    # inicial de outro arquivo da suíte, que compartilha o mesmo banco.
+    from sales_support_agent.models import ActivityLog, ClassificacaoConfig, TokenUsage
 
     def _limpar():
         with Session(engine) as s:
-            for modelo in (TokenUsage, ActivityLog, ClassificacaoRun):
+            for modelo in (TokenUsage, ActivityLog, ClassificacaoRun, ClassificacaoConfig):
                 for linha in s.query(modelo).all():
                     s.delete(linha)
             s.commit()
@@ -218,6 +221,61 @@ def test_o_consumo_de_tokens_e_gravado_junto_com_a_rodada(banco_agendador):
     assert usos["classificacao_agent"].input_tokens == 100
     assert usos["resumo_agent"].output_tokens == 30
     assert len(logs) == 1 and logs[0].action == "CLASSIFICACAO"
+
+
+# ---------------------------------------------------------------------------
+# Autoria da configuração
+# ---------------------------------------------------------------------------
+
+
+def test_a_configuracao_registra_quem_salvou(banco_agendador):
+    """A configuração é da ORGANIZAÇÃO, então a tela precisa dizer de quem é.
+
+    Todo usuário padrão edita a mesma linha. Sem a autoria, quem abre o painel
+    encontra horários que não reconhece sem saber se um colega mudou.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana Souza", autor_email="ana@coester.com.br", horario_1="09:30"
+    )
+
+    cfg = classificacao_config.get_config(1)
+    assert cfg["horario_1"] == "09:30"
+    assert cfg["atualizado_por_nome"] == "Ana Souza"
+    assert cfg["atualizado_por_email"] == "ana@coester.com.br"
+
+
+def test_a_configuracao_do_colega_e_a_que_o_proximo_usuario_ve(banco_agendador):
+    """Persistir entre usuários é o ponto: a última gravação é a que vale."""
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com", horario_1="09:00"
+    )
+    classificacao_config.salvar_config(
+        1, autor_nome="Bruno", autor_email="bruno@x.com", horario_1="10:00"
+    )
+
+    cfg = classificacao_config.get_config(1)
+    assert cfg["horario_1"] == "10:00"
+    assert cfg["atualizado_por_nome"] == "Bruno"
+
+
+def test_o_disparo_agendado_nao_se_passa_por_quem_configurou(banco_agendador):
+    """`marcar_execucao_agendada` escreve na mesma linha, duas vezes por dia.
+
+    Se ela empurrasse a autoria ou o carimbo, o painel diria "alterado hoje às
+    16:00" depois de toda rodada automática, atribuindo a um usuário uma
+    alteração que ninguém fez.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="ana@x.com", horario_1="09:00"
+    )
+    antes = classificacao_config.get_config(1)["updated_at"]
+
+    classificacao_config.marcar_execucao_agendada(1)
+
+    depois = classificacao_config.get_config(1)
+    assert depois["atualizado_por_nome"] == "Ana", "o agendador virou autor da config"
+    assert depois["updated_at"] == antes, "o disparo automático mexeu no carimbo"
+    assert depois["ultima_execucao_agendada"] is not None
 
 
 def test_o_agendador_sobe_pelo_lifespan_e_nao_no_import():

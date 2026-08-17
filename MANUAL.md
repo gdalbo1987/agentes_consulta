@@ -319,6 +319,20 @@ todos.
   dos e-mails já classificados na hora**, sem reprocessar nada.
 - **Varrer as últimas (horas)**: quanto tempo para trás cada execução olha.
 
+**Esta configuração é da organização, não sua.** A caixa é uma só, então os
+horários e a janela valem para todo mundo: o que um usuário salvar, os demais
+passam a ver ao abrir o painel. Por isso o cartão mostra, embaixo do botão de
+salvar, quem alterou por último e quando. Se você encontrar horários que não
+reconhece, é ali que está a resposta.
+
+A linha de autoria só aparece depois que alguém salva. Numa instalação que vem
+de antes desse registro não há o que mostrar, e o espaço fica vazio até a
+primeira alteração.
+
+O disparo automático **não** conta como alteração: ele escreve na mesma
+configuração duas vezes por dia para marcar que já rodou, mas não vira "alterado
+por" nem mexe na data exibida.
+
 ### Pastas do Outlook
 
 Uma linha por classe. Você digita o **nome** da pasta e clica em "Vincular"; o
@@ -405,14 +419,27 @@ precisa ser atendido agora.
 ### As categorias no Outlook
 
 Cada e-mail classificado recebe a categoria da classe (Pedido, Proposta,
-Revisão de pedido, Revisão de proposta), mais **"Classificado por IA"**, mais
-"Urgente" ou "Importante" quando for o caso.
+Revisão de pedido, Revisão de proposta), mais **"IA"**, mais "Urgente" ou
+"Importante" quando for o caso.
 
-A marca "Classificado por IA" existe para você distinguir, de olho, o que a
-plataforma arquivou do que alguém arquivou à mão. É também o que permite achar
-tudo o que o agente tocou, com uma busca por categoria, caso uma execução saia
-errada. E-mail que não se encaixou em nenhuma classe **não** recebe essa marca:
-ele não foi tocado.
+A marca "IA" existe para você distinguir, de olho, o que a plataforma arquivou
+do que alguém arquivou à mão. É também o que permite achar tudo o que o agente
+tocou, com uma busca por categoria, caso uma execução saia errada. E-mail que
+não se encaixou em nenhuma classe **não** recebe essa marca: ele não foi tocado.
+
+O nome é curto porque as categorias dividem a mesma coluna do Outlook: um
+e-mail classificado leva sempre duas e às vezes três, e um rótulo longo
+espremia as outras. Ela se chamava "Classificado por IA" antes. Para trocar o
+nome nas mensagens já arquivadas:
+
+```bash
+python scripts/renomear_categoria_ia.py --dry-run   # mostra o que faria
+python scripts/renomear_categoria_ia.py             # aplica
+python scripts/renomear_categoria_ia.py --reverter  # volta ao nome antigo
+```
+
+Ele preserva todas as outras categorias de cada mensagem, inclusive as que você
+marcou à mão, e não gasta token nenhum.
 
 As categorias aparecem sem cor no Outlook enquanto a permissão
 `MailboxSettings.ReadWrite` não for concedida no Entra ID. É opcional e não
@@ -421,9 +448,9 @@ afeta a classificação.
 A plataforma **nunca remove** categoria: ela lê as que já existem e manda a
 união. O que você marcou à mão no Outlook continua lá.
 
-Se a marca "Classificado por IA" for acrescentada depois que a caixa já tem
-e-mails arquivados, eles não a recebem sozinhos: e-mail já conhecido é pulado
-sem nenhuma chamada ao modelo. Para aplicá-la ao que já está classificado:
+Se a marca "IA" for acrescentada depois que a caixa já tem e-mails arquivados,
+eles não a recebem sozinhos: e-mail já conhecido é pulado sem nenhuma chamada
+ao modelo. Para aplicá-la ao que já está classificado:
 
 ```bash
 python scripts/aplicar_categoria_ia.py --dry-run   # mostra o que faria

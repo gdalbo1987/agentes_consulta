@@ -34,7 +34,12 @@ exige pedido explícito do usuário.
 3. **Uma caixa de e-mails, compartilhada.** A organização monitora uma caixa só,
    configurada em `IntegrationSetting.graph_sender_email`. Horários de execução,
    janela de urgência e mapa de pastas são da ORGANIZAÇÃO, não de cada usuário,
-   e todo usuário padrão vê todos os e-mails classificados.
+   e todo usuário padrão vê todos os e-mails classificados. Como qualquer um
+   edita a mesma linha, `ClassificacaoConfig` guarda `atualizado_por_nome` e
+   `atualizado_por_email`, e o painel mostra de quem é a configuração no ar.
+   `updated_at` só avança em edição de GENTE: `marcar_execucao_agendada` escreve
+   na mesma linha duas vezes por dia, e se empurrasse o carimbo o painel
+   atribuiria a um usuário uma alteração que ninguém fez.
 
 4. **Quatro classes, e só quatro:** `pedido`, `proposta`, `revisao_pedido`,
    `revisao_proposta` (`services/classificacao_rules.CLASSES`). E-mail que não se
@@ -228,8 +233,13 @@ backfill (`urgente AND prazo IS NULL -> semantico = true`) que reconstrói
 exatamente essa informação, e sem ele o primeiro recálculo desmarcaria em
 silêncio todo urgente sem prazo.
 
-**Todo e-mail classificado leva a categoria `Classificado por IA`**
-(`CATEGORIA_IA`), inclusive sem prioridade nenhuma. `scripts/aplicar_categoria_ia.py`
+**Todo e-mail classificado leva a categoria `IA`**
+(`CATEGORIA_IA`), inclusive sem prioridade nenhuma. O nome é curto porque as
+categorias dividem a mesma coluna do Outlook: um classificado leva sempre duas
+(a classe mais esta) e às vezes três, e o rótulo longo anterior
+(`CATEGORIA_IA_ANTERIOR`, mantido só para a migração) cortava as outras.
+`scripts/renomear_categoria_ia.py` troca uma pela outra nas mensagens já
+arquivadas, e tem `--reverter`. `scripts/aplicar_categoria_ia.py`
 aplica a marca retroativamente a quem foi classificado antes de ela existir, sem
 gastar token: a classe já está no banco e falta só o PATCH. Ele é seguro de
 repetir, porque `aplicar_categorias` manda a UNIÃO. É a marca de procedência:

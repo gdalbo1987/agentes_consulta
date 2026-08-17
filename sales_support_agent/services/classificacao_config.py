@@ -64,11 +64,33 @@ def get_config(tenant_id: int) -> dict:
             "max_emails_por_execucao": int(linha.max_emails_por_execucao),
             "ativo": bool(linha.ativo),
             "ultima_execucao_agendada": linha.ultima_execucao_agendada,
+            "atualizado_por_nome": linha.atualizado_por_nome or "",
+            "atualizado_por_email": linha.atualizado_por_email or "",
+            "updated_at": linha.updated_at,
         }
 
 
-def salvar_config(tenant_id: int, **campos) -> None:
-    """Grava só os campos passados (chave ausente não é tocada)."""
+def salvar_config(
+    tenant_id: int,
+    *,
+    autor_nome: str = "",
+    autor_email: str = "",
+    **campos,
+) -> None:
+    """Grava só os campos passados (chave ausente não é tocada).
+
+    `autor_*` identifica a PESSOA que salvou, e é o que o painel exibe para
+    todos os usuários: a configuração é da organização, então quem abre a tela
+    precisa saber de quem é o horário que está no ar.
+
+    `updated_at` só avança quando há autor, e isso é deliberado. Quem mais
+    escreve nesta linha é `marcar_execucao_agendada`, duas vezes por dia, sem
+    nenhuma intervenção humana. Se ela empurrasse o carimbo, o painel diria
+    "alterado hoje às 16:00" depois de toda rodada automática, e o registro de
+    quem configurou apontaria para uma alteração que ninguém fez. O disparo
+    agendado tem a coluna própria dele, `ultima_execucao_agendada`, então nada
+    se perde ao deixar este carimbo para as edições de gente.
+    """
     with rx.session() as session:
         linha = (
             session.query(ClassificacaoConfig)
@@ -81,7 +103,11 @@ def salvar_config(tenant_id: int, **campos) -> None:
 
         for chave, valor in campos.items():
             setattr(linha, chave, valor)
-        linha.updated_at = brt_now()
+
+        if autor_nome or autor_email:
+            linha.atualizado_por_nome = autor_nome
+            linha.atualizado_por_email = autor_email
+            linha.updated_at = brt_now()
         session.commit()
 
 

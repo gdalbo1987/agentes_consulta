@@ -291,6 +291,8 @@ async def stream_classificacao(
             avisos.append(f"Falha ao classificar '{assunto}': {erro}")
             if not dry_run:
                 _gravar(tenant_id, run_id, email, {}, status="falhou", erro=erro)
+            _marcar_progresso(run_id, indice, total)
+            yield ("progress", indice, total, f"Falha ao classificar: {assunto}")
             continue
 
         resumo["processados"] += 1
@@ -300,12 +302,16 @@ async def stream_classificacao(
             resumo["ignorados"] += 1
             if not dry_run:
                 _gravar(tenant_id, run_id, email, resultado, status="ignorado")
+            _marcar_progresso(run_id, indice, total)
+            yield ("progress", indice, total, f"Fora das quatro classes: {assunto}")
             continue
 
         if dry_run:
             resumo["classificados"] += 1
             resumo["urgentes"] += int(resultado["urgente"])
             resumo["importantes"] += int(resultado.get("importante", False))
+            _marcar_progresso(run_id, indice, total)
+            yield ("progress", indice, total, f"Classificado (simulação): {assunto}")
             continue
 
         # --- marcar ANTES de mover -----------------------------------------
@@ -346,6 +352,8 @@ async def stream_classificacao(
                 movido=movido, graph_message_id=graph_id,
                 pasta_destino_id=destino if movido else "",
             )
+            _marcar_progresso(run_id, indice, total)
+            yield ("progress", indice, total, f"Falha ao arquivar: {assunto}")
             continue
 
         email_id = _gravar(
@@ -360,6 +368,14 @@ async def stream_classificacao(
         # --- resumo (Agente 2) ---------------------------------------------
         # Best effort: uma falha aqui não desfaz a classificação, que já moveu
         # o e-mail. O resumo pode ser gerado depois; o arquivamento, não.
+        #
+        # O contador FICA em `indice - 1` aqui de propósito: o e-mail ainda não
+        # terminou. Só o texto muda, para a tela mostrar que o trabalho passou
+        # da classificação para o resumo. Sem este aviso a barra parecia travada
+        # durante a chamada mais demorada do e-mail, e quem olhava concluía que
+        # o processo tinha morrido.
+        yield ("progress", indice - 1, total, f"Resumindo: {assunto}")
+
         ok_r, resumo_txt, erro_r, usage_r = await resumir_email(email, resultado["classe"])
         resumo["usage_resumo"]["input"] += usage_r["input"]
         resumo["usage_resumo"]["output"] += usage_r["output"]
@@ -371,8 +387,14 @@ async def stream_classificacao(
             avisos.append(f"Não foi possível resumir '{assunto}': {erro_r}")
 
         _marcar_progresso(run_id, indice, total)
-        yield ("progress", indice, total, f"Classificado: {assunto}")
+        yield ("progress", indice, total, f"Classificado e resumido: {assunto}")
 
+    # O total é reafirmado aqui porque um e-mail que caiu num `continue` de
+    # falha pode ter deixado o contador atrás. A tela precisa fechar em 100%
+    # antes de a barra sair, ou o usuário fica com a impressão de que o
+    # processo foi interrompido no meio.
+    _marcar_progresso(run_id, total, total)
+    yield ("progress", total, total, "Finalizando...")
     yield ("done", resumo)
 
 

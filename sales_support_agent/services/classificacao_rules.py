@@ -42,7 +42,17 @@ CATEGORIA_IMPORTANTE = "Importante"
 # que a IA arquivou do que uma pessoa arquivou à mão. É também o que torna
 # reversível uma execução mal calibrada: dá para achar tudo o que o agente
 # tocou com uma busca por categoria.
-CATEGORIA_IA = "Classificado por IA"
+#
+# O nome é curto de propósito. As categorias aparecem lado a lado na coluna do
+# Outlook, e um e-mail classificado leva SEMPRE duas ("Pedido" mais esta) e às
+# vezes três (mais "Urgente" ou "Importante"). Com um rótulo longo, as outras
+# duas ficavam cortadas na largura normal da coluna, e a marca de procedência
+# escondia justamente a informação que o time precisa ler de relance.
+CATEGORIA_IA = "IA"
+# Nome anterior desta mesma marca. Fica registrado porque as mensagens já
+# arquivadas continuam com ele no Outlook até a migração passar, e porque é o
+# que `scripts/renomear_categoria_ia.py` procura para substituir.
+CATEGORIA_IA_ANTERIOR = "Classificado por IA"
 
 # Sugestão inicial de nome de pasta, só para o campo do dashboard não nascer
 # vazio. O nome real é o que o usuário digitar, e o backend resolve o id pelo

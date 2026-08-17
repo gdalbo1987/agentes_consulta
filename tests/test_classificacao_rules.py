@@ -121,7 +121,7 @@ def test_email_fora_das_classes_nao_recebe_categoria_nenhuma():
 
 def test_categoria_da_classe_e_o_mesmo_texto_que_o_dashboard_mostra():
     """Quem abre o Outlook tem de ver a mesma palavra que vê na plataforma."""
-    assert regras.categorias_para("pedido", urgente=False) == ["Pedido", "Classificado por IA"]
+    assert regras.categorias_para("pedido", urgente=False) == ["Pedido", "IA"]
     assert regras.CATEGORIAS["revisao_proposta"] == regras.rotulo("revisao_proposta")
 
 
@@ -142,7 +142,7 @@ def test_todo_email_classificado_leva_a_marca_de_procedencia():
 
 def test_urgente_entra_como_categoria_adicional_e_nao_substitui_a_classe():
     assert regras.categorias_para("proposta", urgente=True) == [
-        "Proposta", "Urgente", "Classificado por IA",
+        "Proposta", "Urgente", "IA",
     ]
 
 
@@ -150,7 +150,7 @@ def test_importante_entra_no_lugar_de_urgente_e_nunca_junto():
     """As duas faixas são exclusivas: duas etiquetas de prioridade confundiriam."""
     saida = regras.categorias_para("pedido", urgente=False, importante=True)
 
-    assert saida == ["Pedido", "Importante", "Classificado por IA"]
+    assert saida == ["Pedido", "Importante", "IA"]
     assert regras.CATEGORIA_URGENTE not in saida
 
     urgente = regras.categorias_para("pedido", urgente=True, importante=True)

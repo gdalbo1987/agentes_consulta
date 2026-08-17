@@ -28,6 +28,35 @@ def _bubble(msg) -> rx.Component:
     )
 
 
+def _bolha_em_curso() -> rx.Component:
+    """A resposta sendo digitada, fora da lista de mensagens.
+
+    Ela vive num campo próprio do State para que cada pedaço do texto não
+    reenvie a conversa inteira pelo websocket (ver `ConsultaState.streaming_texto`).
+    Enquanto nada chegou, mostra o mesmo spinner de antes, para a espera pela
+    primeira palavra continuar tendo sinal na tela.
+    """
+    return rx.hstack(
+        rx.box(
+            rx.cond(
+                ConsultaState.streaming_texto != "",
+                rx.text(
+                    ConsultaState.streaming_texto, size="2", color=colors.TEXT_MAIN,
+                    font_family=BODY_FONT, white_space="pre-wrap",
+                ),
+                rx.spinner(size="2", color=colors.HIGHLIGHT),
+            ),
+            background="#eef4fb",
+            color=colors.TEXT_MAIN,
+            padding="0.75rem 1rem",
+            border_radius="14px",
+            max_width="70%",
+        ),
+        width="100%",
+        justify_content="flex-start",
+    )
+
+
 def _sugestao(texto: str) -> rx.Component:
     return rx.button(
         texto,
@@ -89,6 +118,10 @@ def consulta_page() -> rx.Component:
                         _empty_state(),
                         rx.vstack(
                             rx.foreach(ConsultaState.messages, _bubble),
+                            # A resposta em curso entra DEPOIS da lista, e não
+                            # dentro dela: é o que permite o texto crescer sem
+                            # reenviar a conversa toda a cada pedaço.
+                            rx.cond(ConsultaState.is_sending, _bolha_em_curso()),
                             # Âncora invisível: alvo do rx.scroll_to disparado
                             # pelo state a cada nova mensagem/pedaço da
                             # resposta (rolagem automática do chat).

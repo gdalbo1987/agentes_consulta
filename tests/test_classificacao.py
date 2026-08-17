@@ -823,6 +823,63 @@ async def test_o_andamento_e_gravado_na_rodada_a_cada_email(caixa, modelo, banco
     assert (3, 3) in vistos, "o andamento final precisa chegar à linha da rodada"
 
 
+async def test_progresso_avanca_tambem_no_email_ignorado(caixa, modelo, banco):
+    """O andamento não pode depender de o e-mail ter sido classificado.
+
+    Este era o defeito que fazia a barra sumir antes do fim: o progresso só era
+    gravado no caminho de sucesso, então uma rodada com 10 e-mails e 3 fora das
+    quatro classes parava de contar em 7 e desaparecia ali, dando a impressão de
+    que o processo tinha sido interrompido no meio.
+    """
+    from sqlmodel import Session
+
+    for i in range(3):
+        caixa.add_email(assunto=f"Pedido {i}", imid=f"<p{i}@t.com>")
+    caixa.add_email(assunto="Newsletter", imid="<n@t.com>")
+    modelo.por_assunto["Newsletter"] = {
+        "classe": "", "confianca": 10, "urgencia_prazo_horas": None,
+        "urgente": False, "justificativa": "Não se encaixa em nenhuma classe.",
+    }
+
+    vistos = []
+    original = classificacao._marcar_progresso
+
+    def _espiao(run_id, processados, total):
+        original(run_id, processados, total)
+        with Session(banco) as s:
+            vistos.append(s.get(ClassificacaoRun, run_id).processados)
+
+    classificacao._marcar_progresso = _espiao
+    try:
+        eventos, resumo, _ = await _rodar()
+    finally:
+        classificacao._marcar_progresso = original
+
+    assert resumo["ignorados"] == 1
+    assert max(vistos) == 4, (
+        "o andamento tem de chegar ao total mesmo com e-mail ignorado no meio"
+    )
+    # E a tela recebe o mesmo número pelo stream, não só o banco.
+    progressos = [e for e in eventos if e[0] == "progress"]
+    assert (progressos[-1][1], progressos[-1][2]) == (4, 4)
+
+
+async def test_a_fase_de_resumo_aparece_no_progresso(caixa, modelo, banco):
+    """Sem este aviso a barra parecia travada na chamada mais demorada.
+
+    O contador fica onde estava de propósito: o e-mail ainda não terminou. O
+    que muda é só o texto, para quem olha saber que o trabalho passou da
+    classificação para o resumo.
+    """
+    caixa.add_email(assunto="Pedido de bomba")
+    eventos, _, _ = await _rodar()
+
+    textos = [e[3] for e in eventos if e[0] == "progress"]
+    assert any(t.startswith("Resumindo:") for t in textos), textos
+    # E o resumo vem ANTES de o e-mail ser dado por concluído.
+    assert textos.index("Resumindo: Pedido de bomba") < len(textos) - 1
+
+
 async def test_progresso_execucao_enxerga_a_rodada_em_andamento(caixa, modelo, banco):
     """A consulta que a tela sonda enquanto o agente trabalha."""
     from sqlmodel import Session

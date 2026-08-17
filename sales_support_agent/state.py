@@ -497,6 +497,27 @@ class PastaUI(BaseModel):
     erro_resolucao: str
 
 
+def _autoria_config(cfg: dict) -> str:
+    """Frase de "quem configurou por último", pronta para a tela.
+
+    Vazia quando ninguém salvou desde que o registro de autoria passou a
+    existir. Frase vazia é melhor que "alterado por -": a instalação vinha de
+    antes da coluna, e inventar um autor seria pior que não dizer nada.
+    """
+    nome = (cfg.get("atualizado_por_nome") or "").strip()
+    email = (cfg.get("atualizado_por_email") or "").strip()
+    quando = cfg.get("updated_at")
+    if not (nome or email):
+        return ""
+
+    quem = nome or email
+    if nome and email and email != nome:
+        quem = f"{nome} ({email})"
+    if not quando:
+        return f"Última alteração por {quem}."
+    return f"Última alteração por {quem} em {quando.strftime('%d/%m/%Y às %H:%M')}."
+
+
 class DashboardState(AppState):
     """Dashboard do usuário padrão: a tela operacional do Agente 1.
 
@@ -531,6 +552,14 @@ class DashboardState(AppState):
     # transforma "existe rodada terminada" em "acabou de terminar agora".
     _ultima_run_vista: int = 0
     _monitorando: bool = False
+    # Esta sessão chegou a ver a rodada EM ANDAMENTO. Sem este registro, o
+    # aviso de conclusão nunca aparecia: a sondagem zerava a última rodada
+    # vista enquanto rodava, e a conclusão real era lida como "primeiro olhar".
+    _viu_rodando: bool = False
+    # Execução manual disparada NESTA sessão, ainda sem linha no banco. Cobre a
+    # janela entre o clique e a criação da rodada, em que a sondagem apagaria a
+    # barra de progresso recém-acesa.
+    _manual_em_curso: bool = False
 
     # --- configuração (espelha ClassificacaoConfig) ---
     horario_1: str = "08:00"
@@ -538,6 +567,11 @@ class DashboardState(AppState):
     janela_urgencia_horas: str = "24"
     lookback_horas: str = "48"
     proxima_execucao: str = "-"
+    # Quem salvou a configuração por último, e quando. A configuração é da
+    # ORGANIZAÇÃO: todo usuário padrão edita a mesma linha, e o que um salva o
+    # outro vê. Sem esta autoria na tela, quem abrisse o painel encontraria
+    # horários que não reconhece sem saber se um colega mudou.
+    config_autoria: str = ""
     # Interruptor do AGENDADO. Não desabilita "Classificar agora".
     agendamento_ativo: bool = False
     confirm_zerar_open: bool = False
@@ -646,6 +680,7 @@ class DashboardState(AppState):
         self.janela_urgencia_horas = str(cfg["janela_urgencia_horas"])
         self.lookback_horas = str(cfg["lookback_horas"])
         self.agendamento_ativo = cfg["ativo"]
+        self.config_autoria = _autoria_config(cfg)
 
         proxima = classificacao_config.proxima_execucao(brt_now(), cfg)
         self.proxima_execucao = proxima.strftime("%d/%m/%Y %H:%M") if proxima else "-"
@@ -692,6 +727,20 @@ class DashboardState(AppState):
         self._carregar_metricas()
         self.carregar_tabela()
         return toast_success("Lista atualizada.")
+
+    def atualizar_metricas_e_lista(self):
+        """Recarrega indicadores e tabela SEM apagar o aviso de conclusão.
+
+        É o que roda no fim de uma execução. Difere de `atualizar_lista`, o
+        botão, em duas coisas de propósito: não mostra toast, porque a rodada
+        já mostrou o seu, e não limpa `conclusao_texto`, que é exatamente o
+        aviso que acabou de ser escrito. Difere de `load_dashboard_data` por
+        não reler configuração nem pastas, que não mudaram.
+        """
+        if not self.is_authenticated:
+            return
+        self._carregar_metricas()
+        self.carregar_tabela()
 
     def carregar_tabela(self):
         from sales_support_agent.services import emails_query
@@ -774,6 +823,8 @@ class DashboardState(AppState):
 
         classificacao_config.salvar_config(
             self.tenant_id,
+            autor_nome=self.user_name,
+            autor_email=self.user_email,
             horario_1=self.horario_1,
             horario_2=self.horario_2,
             janela_urgencia_horas=janela,
@@ -828,7 +879,12 @@ class DashboardState(AppState):
                     f"O {rotulo_campo} precisa estar no formato HH:MM antes de iniciar."
                 )
 
-        classificacao_config.salvar_config(self.tenant_id, ativo=True)
+        classificacao_config.salvar_config(
+            self.tenant_id,
+            autor_nome=self.user_name,
+            autor_email=self.user_email,
+            ativo=True,
+        )
         agendador.reprogramar(self.tenant_id)
 
         with rx.session() as session:
@@ -860,7 +916,12 @@ class DashboardState(AppState):
         if not self.is_authenticated:
             return rx.redirect("/login")
 
-        classificacao_config.salvar_config(self.tenant_id, ativo=False)
+        classificacao_config.salvar_config(
+            self.tenant_id,
+            autor_nome=self.user_name,
+            autor_email=self.user_email,
+            ativo=False,
+        )
         agendador.reprogramar(self.tenant_id)
 
         with rx.session() as session:
@@ -993,26 +1054,36 @@ class DashboardState(AppState):
                 terminou = False
 
                 async with self:
-                    self.is_running = progresso["em_andamento"]
                     if progresso["em_andamento"]:
+                        self.is_running = True
+                        self._viu_rodando = True
                         self.execucao_origem = progresso["origem"]
                         self.progresso_atual = progresso["processados"]
                         self.progresso_total = progresso["total"]
                         self.conclusao_texto = ""
                         if not self.progresso_texto:
                             self.progresso_texto = "Classificando..."
-                        self._ultima_run_vista = 0  # a próxima conclusão é novidade
+                    elif self._manual_em_curso:
+                        # Janela entre o clique em "Classificar agora" e a
+                        # criação da linha da rodada: o banco ainda não tem
+                        # nada `running`, mas a execução COMEÇOU. Sem esta
+                        # guarda a sondagem apagava a barra logo depois do
+                        # clique, e ela só voltava na sondagem seguinte.
+                        pass
                     else:
+                        self.is_running = False
                         self.execucao_origem = ""
                         self.progresso_texto = ""
                         ultima = progresso["ultima_run_id"]
-                        # Só é "acabou agora" se esta sessão ainda não viu esta
-                        # rodada. Sem a comparação, o aviso de concluído
-                        # reapareceria a cada sondagem, para sempre.
+                        # "Acabou agora" é ter visto a rodada EM ANDAMENTO e
+                        # depois vê-la terminada. Comparar só o id não basta:
+                        # quem abre o painel depois do fato veria o aviso de
+                        # uma rodada de horas atrás como se fosse novidade.
                         if ultima and ultima != self._ultima_run_vista:
-                            primeiro_olhar = self._ultima_run_vista == 0
+                            acabou_agora = self._viu_rodando
                             self._ultima_run_vista = ultima
-                            if not primeiro_olhar:
+                            self._viu_rodando = False
+                            if acabou_agora:
                                 terminou = True
                                 if progresso["ultima_status"] == "error":
                                     self.conclusao_erro = True
@@ -1138,6 +1209,9 @@ class DashboardState(AppState):
             tenant_id = self.tenant_id
             user_email = self.user_email
             self.is_running = True
+            self._manual_em_curso = True
+            self._viu_rodando = True
+            self.conclusao_texto = ""
             self.progresso_texto = "Preparando..."
             self.progresso_atual = 0
             self.progresso_total = 0
@@ -1150,6 +1224,7 @@ class DashboardState(AppState):
         if run_id is None:
             async with self:
                 self.is_running = False
+                self._manual_em_curso = False
                 self.progresso_texto = ""
             yield toast_error("Já existe uma classificação em andamento.")
             return
@@ -1168,22 +1243,42 @@ class DashboardState(AppState):
             elif evento[0] == "error":
                 erro = evento[1]
 
+        # A barra só sai DEPOIS daqui. `finalizar_rodada` é o que grava
+        # contadores, duração e o consumo de tokens: enquanto ela não volta, a
+        # rodada não terminou, mesmo com todos os e-mails já classificados e
+        # resumidos.
         agendador.finalizar_rodada(run_id, resumo or {}, erro)
 
+        r = resumo or {}
         async with self:
             self.is_running = False
+            self._manual_em_curso = False
             self.progresso_texto = ""
+            # Esta sessão já deu o recado desta rodada. Sem marcar, a sondagem
+            # a veria terminar e mostraria o mesmo aviso uma segunda vez.
+            self._ultima_run_vista = run_id
+            self._viu_rodando = False
+            self.conclusao_erro = bool(erro)
+            self.conclusao_texto = (
+                f"A classificação terminou com erro: {erro}"
+                if erro
+                else (
+                    "Classificação manual concluída: "
+                    f"{r.get('classificados', 0)} classificado(s), "
+                    f"{r.get('ignorados', 0)} ignorado(s), "
+                    f"{r.get('puladas', 0)} já conhecido(s)."
+                )
+            )
 
         if erro:
             yield toast_error(erro)
         else:
-            r = resumo or {}
             yield toast_success(
                 f"{r.get('classificados', 0)} classificado(s), "
                 f"{r.get('ignorados', 0)} ignorado(s), "
                 f"{r.get('puladas', 0)} já conhecido(s)."
             )
-        yield DashboardState.load_dashboard_data
+        yield DashboardState.atualizar_metricas_e_lista
 
     # ------------------------------------------------------- detalhe
     def abrir_detalhe(self, email_id: int):
@@ -1307,6 +1402,22 @@ class ConsultaState(AppState):
     error: str = ""
     clear_dialog_open: bool = False
 
+    # Resposta em construção, FORA de `messages`, e essa separação é de
+    # desempenho, não de estilo.
+    #
+    # O Reflex serializa a variável inteira a cada alteração. Enquanto o texto
+    # crescia dentro de `messages`, cada pedaço de 4 palavras reenviava a
+    # CONVERSA TODA pelo websocket: uma resposta de 200 palavras são 50 pedaços,
+    # e numa conversa de 20 mensagens isso é meio megabyte de tráfego para
+    # entregar um parágrafo. Pior, o custo cresce com o tamanho do histórico,
+    # então o chat ia degradando conforme era usado, e o processo é o mesmo que
+    # atende todo mundo: o efeito aparecia como travada de renderização também
+    # para quem estava noutra tela.
+    #
+    # Com o texto num campo próprio, cada pedaço envia só o que mudou, e o
+    # histórico é reenviado uma vez, no fim do turno.
+    streaming_texto: str = ""
+
     def set_pergunta(self, value: str):
         self.pergunta = value
 
@@ -1360,9 +1471,11 @@ class ConsultaState(AppState):
             self.pergunta = ""
             self.error = ""
             self.is_sending = True
+            self.streaming_texto = ""
+            # Só a pergunta entra na lista. A resposta é montada em
+            # `streaming_texto` e só vira mensagem quando termina.
             self.messages = self.messages + [
-                ChatMessageUI(role="user", content=pergunta),
-                ChatMessageUI(role="assistant", content=""),
+                ChatMessageUI(role="user", content=pergunta)
             ]
         yield rx.scroll_to("chat-anchor", align_to_top=False)
 
@@ -1386,17 +1499,16 @@ class ConsultaState(AppState):
                 ))
                 session.commit()
 
-        texto_atual = ""
         async for event in stream_resposta(tenant_id, user_email, pergunta):
             kind = event[0]
 
             if kind == "delta":
                 _, pedaco = event
-                texto_atual += pedaco
                 async with self:
-                    self.messages = self.messages[:-1] + [
-                        ChatMessageUI(role="assistant", content=texto_atual)
-                    ]
+                    self.streaming_texto = self.streaming_texto + pedaco
+                # A rolagem continua a cada pedaço: a bolha cresce para baixo e
+                # sem isso o texto sai da área visível. O que era caro era a
+                # lista de mensagens junto, não este evento.
                 yield rx.scroll_to("chat-anchor", align_to_top=False)
                 await asyncio.sleep(0.04)
 
@@ -1404,23 +1516,25 @@ class ConsultaState(AppState):
                 _, texto, usage = event
                 _gravar_consumo(usage)
                 async with self:
-                    self.messages = self.messages[:-1] + [
+                    # Agora sim a lista muda, uma vez só no turno inteiro.
+                    self.messages = self.messages + [
                         ChatMessageUI(role="assistant", content=texto)
                     ]
+                    self.streaming_texto = ""
                 yield rx.scroll_to("chat-anchor", align_to_top=False)
 
             elif kind == "error":
                 _, msg, usage = event
                 _gravar_consumo(usage)
                 async with self:
-                    # Remove o placeholder vazio do assistente — só a pergunta
-                    # do usuário e o erro ficam visíveis.
-                    self.messages = self.messages[:-1]
+                    # A pergunta do usuário fica; o que não veio é a resposta.
+                    self.streaming_texto = ""
                     self.error = msg
                     yield toast_error(msg)
 
         async with self:
             self.is_sending = False
+            self.streaming_texto = ""
 
     def confirm_limpar_conversa(self):
         """Apaga todo o histórico da conversa (usuário atual, neste tenant)."""

@@ -353,6 +353,19 @@ class ClassificacaoConfig(SQLModel, table=True):
     ultima_execucao_agendada: Optional[datetime] = None
     updated_at: datetime = Field(default_factory=brt_now)
 
+    # Quem salvou por último, e como se chamava na hora. A configuração é da
+    # ORGANIZAÇÃO e todo usuário padrão pode mexer nela, então a tela precisa
+    # dizer de quem é a configuração que está no ar: sem isso, quem abre o
+    # painel vê horários que não reconhece e não tem como saber se foi um
+    # colega que mudou ou se é resquício de teste.
+    #
+    # O NOME é desnormalizado de propósito, e não uma chave estrangeira para
+    # `user`. É um registro histórico ("quem configurou assim"), e apagar o
+    # usuário depois não pode transformar a resposta em um id órfão nem
+    # derrubar o painel.
+    atualizado_por_nome: str = Field(default="")
+    atualizado_por_email: str = Field(default="")
+
 
 class PastaClasse(SQLModel, table=True):
     """Mapa classe -> pasta do Outlook. O usuário informa o NOME; o backend

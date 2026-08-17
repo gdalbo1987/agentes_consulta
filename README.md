@@ -20,7 +20,7 @@ movido**: ele fica exatamente onde estava.
 
 A prioridade tem duas faixas: **urgente** quando a data pedida cai dentro da
 janela configurada, e **importante** quando existe data, mas além dela. Todo
-e-mail classificado leva também a categoria `Classificado por IA`, que é o que
+e-mail classificado leva também a categoria `IA`, que é o que
 separa no Outlook o que o agente arquivou do que uma pessoa arquivou à mão.
 
 A classificação roda **duas vezes por dia**, nos horários que o time define, e
