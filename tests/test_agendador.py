@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from sales_support_agent.models import ClassificacaoRun
-from sales_support_agent.services import agendador, classificacao_config
+from sales_support_agent.services import agendador, classificacao, classificacao_config
 
 HOJE = datetime(2026, 8, 7)
 
@@ -383,6 +383,121 @@ def test_o_disparo_agendado_nao_invalida_a_tela_de_quem_esta_editando(banco_agen
         versao_esperada=versao, horario_1="10:00",
     )
     assert classificacao_config.get_config(1)["horario_1"] == "10:00"
+
+
+# ---------------------------------------------------------------------------
+# Batimento do agendador: por que ele não rodou
+# ---------------------------------------------------------------------------
+
+
+async def test_o_tick_registra_que_nao_rodou_porque_esta_parado(banco_agendador):
+    """A falha exata que tirou a operação do ar por dias.
+
+    O agendador NÃO quebrou: ele decidiu corretamente não rodar, porque o
+    interruptor estava desligado, e saiu em silêncio. Da tela, "está parado",
+    "deu erro" e "o processo morreu" eram o mesmo nada.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="a@x.com", ativo=False,
+        horario_1="00:01", horario_2="00:02",
+    )
+
+    await agendador._tick(1)
+
+    cfg = classificacao_config.get_config(1)
+    assert cfg["ultimo_tick_em"] is not None, "o tick não deixou rastro nenhum"
+    assert "paradas" in cfg["ultimo_tick_resultado"]
+    assert "Iniciar" in cfg["ultimo_tick_resultado"], "o recado não diz o que fazer"
+
+
+async def test_o_tick_registra_quando_nao_ha_horario_vencido(banco_agendador):
+    """Silêncio normal também precisa de rastro.
+
+    Sem isto, "verifiquei e não havia o que fazer" fica indistinguível de "não
+    verifiquei", que é justamente a diferença entre estar tudo bem e o processo
+    ter morrido.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="a@x.com", ativo=True,
+        horario_1="23:58", horario_2="23:59",
+    )
+
+    await agendador._tick(1)
+
+    cfg = classificacao_config.get_config(1)
+    assert cfg["ultimo_tick_em"] is not None
+    assert "Nada a fazer" in cfg["ultimo_tick_resultado"]
+
+
+async def test_o_tick_nao_consome_o_horario_quando_a_rodada_nem_comeca(banco_agendador):
+    """Marcar o slot ANTES de rodar perdia o dia por causa de um erro invisível.
+
+    Com outra rodada em andamento, esta sai sem fazer nada. Se o horário fosse
+    marcado assim mesmo, o agente ficaria mudo até o dia seguinte, e o motivo
+    não estaria em lugar nenhum.
+    """
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="a@x.com", ativo=True,
+        horario_1="00:01", horario_2="00:02",
+    )
+    agendador.reivindicar_rodada(1, origem="manual")  # ocupa a vaga
+
+    await agendador._tick(1)
+
+    cfg = classificacao_config.get_config(1)
+    assert cfg["ultima_execucao_agendada"] is None, "o horário do dia foi consumido à toa"
+    assert "não rodou" in cfg["ultimo_tick_resultado"]
+
+
+async def test_uma_falha_no_tick_vira_recado_e_nao_excecao_perdida(banco_agendador, monkeypatch):
+    """Exceção que escapa sobe para o APScheduler e morre num log que ninguém lê."""
+    classificacao_config.salvar_config(
+        1, autor_nome="Ana", autor_email="a@x.com", ativo=True,
+        horario_1="00:01", horario_2="00:02",
+    )
+
+    async def _explode(*a, **k):
+        raise RuntimeError("a internet caiu")
+
+    monkeypatch.setattr(agendador, "executar", _explode)
+
+    await agendador._tick(1)  # não pode levantar
+
+    cfg = classificacao_config.get_config(1)
+    assert "a internet caiu" in cfg["ultimo_tick_resultado"]
+
+
+def test_o_bloqueio_diz_ate_quando_vai_durar(banco_agendador):
+    """"Já existe uma classificação em andamento" sozinho é um beco."""
+    agendador.reivindicar_rodada(1, origem="agendado", slot="h1")
+
+    recado = classificacao.descrever_rodada_em_andamento(1)
+
+    assert "automática" in recado
+    assert "liberada automaticamente" in recado
+
+
+def test_sem_rodada_no_banco_o_recado_manda_atualizar_a_pagina(banco_agendador):
+    """O bloqueio veio da tela, não da execução: a saída é recarregar."""
+    recado = classificacao.descrever_rodada_em_andamento(1)
+
+    assert "não há nenhuma no banco" in recado
+    assert "Atualize a página" in recado
+
+
+def test_o_supervisor_e_registrado_com_o_tick_como_alvo():
+    """A recuperação depende de o supervisor chamar o MESMO tick dos horários.
+
+    Se alguém apontá-lo para outra função, o horário perdido por reinício de
+    processo volta a se perder, e o sintoma é o silêncio de sempre.
+    """
+    fonte = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "sales_support_agent" / "services" / "agendador.py"
+    ).read_text(encoding="utf-8")
+
+    assert "IntervalTrigger(minutes=_SUPERVISOR_MINUTOS)" in fonte
+    assert "id=_JOB_SUPERVISOR" in fonte
 
 
 def test_o_agendador_sobe_pelo_lifespan_e_nao_no_import():

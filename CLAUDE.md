@@ -288,6 +288,26 @@ errado; ela não executa ação, não chama ferramenta e não despeja texto livr
 pipeline. Quem transformar a saída em texto livre estará removendo a proteção
 principal, e não apenas mudando o formato.
 
+**O prompt do Agente 1 é EDITÁVEL pelo usuário**, no painel. `PROMPT_PADRAO` é
+o texto do código; `PromptAgente` guarda a versão em vigor da organização, com
+autoria e número de versão, e `prompts.texto_em_vigor` cai no padrão quando não
+há linha. **Linha ausente significa "seguindo o código"**, e é por isso que
+"Restaurar padrão" APAGA a linha em vez de copiar o texto: copiado, ele
+congelaria na versão do dia do clique e nenhuma melhoria futura chegaria a quem
+restaurou.
+
+A substituição dos marcadores usa `str.replace` e **nunca** `str.format`. O
+texto vem de um campo que qualquer usuário edita, e com `format` um `{` avulso
+digitado sem querer levantaria `KeyError` no meio da rodada, derrubando a
+classificação da caixa inteira. Com `replace`, o pior caso é um marcador
+chegar cru ao modelo: classifica pior, não para a operação.
+
+Editável por usuário padrão, e não só por super admin, de propósito: quem
+convive com os e-mails é quem sabe que "PI" quer dizer pedido interno nesta
+casa. O que protege não é restringir quem edita, é a autoria, a versão e a
+volta ao padrão. A defesa contra injeção continua sendo o `output_type`, que é
+de código e não passa por aqui.
+
 ### Agente 2, resumo
 
 Roda na mesma execução, logo depois de uma classificação bem-sucedida, e nunca
@@ -425,6 +445,27 @@ Três defesas contra disparo duplicado, porque nenhuma sozinha basta:
    que a flag `is_running` do State, que vive por sessão de browser e é
    invisível para a CLI. O lock morre com a conexão, então não substitui a
    recuperação de rodada travada de 20 minutos.
+
+**Toda passagem do `_tick` grava o que decidiu** em
+`ClassificacaoConfig.ultimo_tick_em` / `ultimo_tick_resultado`, inclusive a
+passagem que não faz nada. Isso não é telemetria: foi a falha que tirou a
+operação do ar por dias. O agendador funcionava e decidia CORRETAMENTE não
+rodar, porque o interruptor estava desligado, e saía em silêncio. Da tela,
+"está parado", "deu erro" e "o processo morreu" eram o mesmo nada. Com o
+batimento, o painel distingue os três, e a AUSÊNCIA de batimento recente passa
+a ser o sinal de que o processo não está acordando, que é diagnóstico
+diferente e não se resolve por botão nenhum.
+
+Existe um **quarto job, o supervisor**, a cada `_SUPERVISOR_MINUTOS` (10). Ele
+não é um terceiro horário: `slot_devido` continua decidindo, e horário já
+rodado hoje segue recusado. Ele existe porque depender só dos dois gatilhos
+exatos é frágil de um jeito que não aparece em teste (processo reiniciado às
+06:59 perde as 07:00, misfire vence, a máquina hiberna), e porque é ele que
+mantém o batimento vivo.
+
+**O slot só é marcado como executado DEPOIS da reivindicação.** Marcando antes,
+uma rodada que nem começasse consumiria o horário do dia, e o agente ficaria
+mudo até o dia seguinte por causa de um erro que ninguém viu.
 
 `scripts/classificar.py` roda a mesma execução fora da aplicação. Serve para
 conferir com `--dry-run` antes de deixar o agente mexer numa caixa de produção,

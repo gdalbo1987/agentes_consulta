@@ -102,6 +102,52 @@ def recuperar_rodada_travada(tenant_id: int) -> Optional[str]:
         return f"{len(travadas)} execução(ões) travada(s) foram encerradas."
 
 
+def descrever_rodada_em_andamento(tenant_id: int) -> str:
+    """Por que a rodada está bloqueada, e até quando.
+
+    "Já existe uma classificação em andamento" sozinho não ajuda: quem lê não
+    sabe se é de agora, se é de ontem, se ela vai sair sozinha ou se precisa
+    chamar alguém. Com origem, idade e o prazo de liberação, a mensagem vira
+    uma decisão ("espero 3 minutos") em vez de um beco.
+    """
+    with rx.session() as session:
+        rodada = (
+            session.query(ClassificacaoRun)
+            .filter(
+                ClassificacaoRun.tenant_id == tenant_id,
+                ClassificacaoRun.status == "running",
+            )
+            .order_by(ClassificacaoRun.started_at.desc())
+            .first()
+        )
+        if not rodada:
+            # Sem linha no banco, o bloqueio veio da tela e não da execução.
+            return (
+                "A tela achava que havia uma classificação em andamento, mas não "
+                "há nenhuma no banco. Atualize a página e tente de novo."
+            )
+
+        origem = "automática" if rodada.origem == "agendado" else "manual"
+        inicio = rodada.started_at
+        if not inicio:
+            return f"Já existe uma classificação {origem} em andamento."
+
+        minutos = max(0, int((brt_now() - inicio).total_seconds() // 60))
+        restam = LIMITE_TRAVADO_MINUTOS - minutos
+        quando = inicio.strftime("%H:%M")
+
+        if restam > 0:
+            return (
+                f"Já existe uma classificação {origem} em andamento, iniciada às "
+                f"{quando} (há {minutos} min). Se ela tiver travado, será liberada "
+                f"automaticamente em {restam} min."
+            )
+        return (
+            f"Havia uma classificação {origem} parada desde as {quando}. Ela acabou "
+            "de ser encerrada como travada; tente novamente agora."
+        )
+
+
 def ha_rodada_em_andamento(tenant_id: int) -> bool:
     with rx.session() as session:
         return (

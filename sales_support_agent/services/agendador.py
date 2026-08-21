@@ -47,6 +47,22 @@ TENANT_PADRAO = 1
 
 _scheduler = None
 _JOBS = ("classificacao_h1", "classificacao_h2")
+_JOB_SUPERVISOR = "classificacao_supervisor"
+
+# De quanto em quanto tempo o supervisor acorda. Ele não é um terceiro horário:
+# `slot_devido` continua sendo quem decide, e um horário já rodado hoje segue
+# recusado. O supervisor existe por dois motivos.
+#
+# RECUPERAÇÃO. Depender só dos dois gatilhos exatos torna a operação frágil de
+# um jeito que não aparece em teste: processo reiniciado às 06:59 perde o
+# gatilho das 07:00, `misfire_grace_time` vence, a máquina hiberna, o relógio
+# do host anda. Em qualquer desses casos o horário fica perdido até o dia
+# seguinte. Com o supervisor, ele é recuperado na próxima passagem.
+#
+# BATIMENTO. Ele grava `ultimo_tick_em` a cada passagem, então o painel
+# consegue distinguir "não rodou porque está parado" de "não rodou porque o
+# processo morreu". Sem isso, os dois são o mesmo silêncio na tela.
+_SUPERVISOR_MINUTOS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -214,15 +230,76 @@ async def executar(tenant_id: int, *, origem: str, slot: str = "", user_email: s
 
 
 async def _tick(tenant_id: int = TENANT_PADRAO) -> None:
-    """Verifica se algum horário está vencido e, se estiver, roda."""
-    cfg = classificacao_config.get_config(tenant_id)
-    slot = classificacao_config.slot_devido(brt_now(), cfg)
-    if not slot:
-        return
+    """Verifica se algum horário está vencido e, se estiver, roda.
 
-    log.info("Horário %s vencido; iniciando a classificação agendada.", slot)
-    classificacao_config.marcar_execucao_agendada(tenant_id)
-    await executar(tenant_id, origem="agendado", slot=slot)
+    TODA passagem grava o que decidiu, inclusive a que não faz nada. Este era o
+    buraco que derrubou a operação: o agendador funcionava, decidia
+    corretamente não rodar porque o interruptor estava desligado, e saía em
+    silêncio. Da tela, "está parado", "deu erro" e "o processo morreu" ficavam
+    idênticos, e a caixa passou dias sem classificar sem ninguém saber por quê.
+    """
+    try:
+        cfg = classificacao_config.get_config(tenant_id)
+
+        if not cfg.get("ativo"):
+            classificacao_config.registrar_tick(
+                tenant_id,
+                "Não executou: as execuções automáticas estão paradas. "
+                "Use o botão Iniciar.",
+            )
+            return
+
+        slot = classificacao_config.slot_devido(brt_now(), cfg)
+        if not slot:
+            classificacao_config.registrar_tick(
+                tenant_id, "Nada a fazer: nenhum horário vencido no momento."
+            )
+            return
+
+        log.info("Horário %s vencido; iniciando a classificação agendada.", slot)
+
+        # A marca do slot vem DEPOIS da reivindicação, e não antes. Marcando
+        # antes, uma rodada que nem chegasse a começar (outra em andamento, ou
+        # falha ao criar a linha) consumiria o horário do dia assim mesmo, e o
+        # agente ficaria em silêncio até o dia seguinte por causa de um erro que
+        # ninguém viu.
+        resultado = await executar(tenant_id, origem="agendado", slot=slot)
+
+        if resultado.get("pulou"):
+            classificacao_config.registrar_tick(
+                tenant_id,
+                f"Horário {slot} vencido, mas não rodou: {resultado.get('motivo', '')}.",
+            )
+            return
+
+        classificacao_config.marcar_execucao_agendada(tenant_id)
+
+        if resultado.get("erro"):
+            classificacao_config.registrar_tick(
+                tenant_id, f"Horário {slot}: a execução terminou com erro. {resultado['erro']}"
+            )
+            return
+
+        r = resultado.get("resumo") or {}
+        classificacao_config.registrar_tick(
+            tenant_id,
+            f"Horário {slot} executado: {r.get('classificados', 0)} classificado(s), "
+            f"{r.get('ignorados', 0)} ignorado(s), {r.get('puladas', 0)} já conhecido(s), "
+            f"{r.get('falhas', 0)} falha(s).",
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        # Uma exceção que escapasse daqui subiria para o APScheduler, que a
+        # engole num log que ninguém lê. Pior: com `max_instances=1`, um job
+        # que morre de forma estranha pode deixar o agendador sem executar de
+        # novo, e o sintoma na tela é o mesmo silêncio de antes.
+        log.exception("Falha inesperada no tick do agendador.")
+        try:
+            classificacao_config.registrar_tick(
+                tenant_id, f"Falha inesperada na verificação automática: {exc}"
+            )
+        except Exception:  # noqa: BLE001 - registrar não pode derrubar o tick
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +350,23 @@ async def iniciar(tenant_id: int = TENANT_PADRAO) -> None:
     _scheduler = AsyncIOScheduler()
     _scheduler.start()
     reprogramar(tenant_id)
+
+    # O supervisor não depende dos horários, então fica fora do `reprogramar`:
+    # ele precisa continuar batendo mesmo que os dois horários estejam
+    # inválidos e nenhum job de cron tenha sido criado. É exatamente nesse
+    # cenário que o painel mais precisa de sinal de vida.
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    _scheduler.add_job(
+        _tick,
+        IntervalTrigger(minutes=_SUPERVISOR_MINUTOS),
+        id=_JOB_SUPERVISOR,
+        replace_existing=True,
+        kwargs={"tenant_id": tenant_id},
+        misfire_grace_time=_SUPERVISOR_MINUTOS * 60,
+        coalesce=True,
+        max_instances=1,
+    )
 
     # Verificação de partida: recupera o horário perdido enquanto a máquina
     # estava desligada. Em tarefa separada para não segurar o startup do ASGI

@@ -99,6 +99,8 @@ def get_config(tenant_id: int) -> dict:
             "atualizado_por_email": linha.atualizado_por_email or "",
             "updated_at": linha.updated_at,
             "versao": int(linha.versao or 0),
+            "ultimo_tick_em": linha.ultimo_tick_em,
+            "ultimo_tick_resultado": linha.ultimo_tick_resultado or "",
         }
 
 
@@ -187,6 +189,22 @@ def salvar_config(
             linha.updated_at = brt_now()
             linha.versao = int(linha.versao or 0) + 1
         session.commit()
+
+
+def registrar_tick(tenant_id: int, resultado: str) -> None:
+    """Grava que o agendador acordou e o que ele decidiu.
+
+    Chamado em TODA passagem, inclusive nas que não fazem nada. É justamente a
+    passagem que não faz nada que precisa deixar rastro: sem ela, "não rodou
+    porque está parado" e "o processo morreu" são indistinguíveis na tela, e
+    foi exatamente essa confusão que deixou a caixa sem classificar por dias.
+
+    Não passa autor nem mexe na versão: isto é batimento de máquina, não edição
+    de gente (ver `salvar_config`).
+    """
+    salvar_config(
+        tenant_id, ultimo_tick_em=brt_now(), ultimo_tick_resultado=resultado[:400]
+    )
 
 
 def marcar_execucao_agendada(tenant_id: int, quando: Optional[datetime] = None) -> None:

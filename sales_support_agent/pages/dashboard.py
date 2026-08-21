@@ -161,6 +161,79 @@ def _acao() -> rx.Component:
     )
 
 
+def _estado_do_agendador() -> rx.Component:
+    """Diz, sem precisar de log de servidor, por que o agente não rodou.
+
+    Esta é a correção da falha real que tirou a operação do ar: o agendador
+    funcionava e decidia corretamente não rodar, porque o interruptor estava
+    desligado, mas nada na tela dizia isso de forma permanente. O selo de
+    "Automático parado" era um pill discreto no meio de outros números, e o
+    aviso ao salvar a configuração era um toast, que some.
+
+    São dois estados diferentes, e separá-los importa:
+
+    * PARADO: alguém apertou Parar. Resolve-se com um clique, aqui mesmo.
+    * SEM SINAL: o processo não está acordando. Nenhum botão desta tela
+      resolve, e o recado tem de mandar procurar quem cuida do servidor.
+    """
+    return rx.vstack(
+        rx.cond(
+            DashboardState.agendador_sem_sinal,
+            rx.callout(
+                DashboardState.agendador_batimento,
+                icon="triangle-alert", color_scheme="red",
+                width="100%",
+            ),
+        ),
+        rx.cond(
+            ~DashboardState.agendamento_ativo,
+            rx.callout(
+                rx.hstack(
+                    rx.vstack(
+                        rx.text(
+                            "As execuções automáticas estão PARADAS.",
+                            size="2", font_weight="700", font_family=BODY_FONT,
+                        ),
+                        rx.text(
+                            "A caixa não será classificada nos horários "
+                            "configurados até alguém iniciar. Salvar os horários "
+                            "não liga o agente.",
+                            size="1", font_family=BODY_FONT,
+                        ),
+                        spacing="1", align_items="start",
+                    ),
+                    rx.spacer(),
+                    rx.button(
+                        rx.icon(tag="power", size=14),
+                        "Iniciar agora",
+                        on_click=DashboardState.iniciar_agendamento,
+                        disabled=DashboardState.pastas_pendentes,
+                        variant="soft", color_scheme="amber", cursor="pointer",
+                        size="2", flex_shrink="0",
+                    ),
+                    width="100%", align_items="center", spacing="3", wrap="wrap",
+                ),
+                icon="circle-pause", color_scheme="amber", width="100%",
+            ),
+        ),
+        # O batimento aparece mesmo com tudo em ordem: é ele que transforma
+        # "não aconteceu nada" em "verifiquei às 16:00 e não havia o que fazer".
+        rx.cond(
+            DashboardState.agendador_sem_sinal,
+            rx.fragment(),
+            rx.hstack(
+                rx.icon(tag="activity", size=13, color=colors.TEXT_SEC),
+                rx.text(
+                    DashboardState.agendador_batimento, size="1",
+                    color=colors.TEXT_SEC, font_family=BODY_FONT,
+                ),
+                spacing="2", align_items="center",
+            ),
+        ),
+        width="100%", spacing="2", margin_bottom="1.5rem", align_items="start",
+    )
+
+
 def _progresso() -> rx.Component:
     """Barra de progresso e aviso de conclusão.
 
@@ -310,6 +383,120 @@ def _configuracao() -> rx.Component:
                 ),
                 spacing="2", align_items="center", margin_top="0.75rem",
             ),
+        ),
+    )
+
+
+def _prompt_classificador() -> rx.Component:
+    """Card expansível com as instruções do Agente 1, editáveis.
+
+    Nasce fechado: são quase 18 mil caracteres, e aberto por padrão ele
+    empurraria a tabela de e-mails para fora da tela de quem só quer ver o que
+    chegou hoje.
+
+    Editável por qualquer usuário, e não só pelo super admin. Quem convive com
+    os e-mails é quem sabe que "PI" quer dizer pedido interno nesta casa, e
+    exigir um administrador para corrigir uma regra de classificação é o que
+    faz a calibragem nunca acontecer. O que protege é o registro de autoria, o
+    número da versão e o botão de voltar ao padrão, todos aqui na tela.
+    """
+    return _cartao(
+        "Instruções do classificador",
+        rx.hstack(
+            rx.text(
+                "É o texto que decide a classe de cada e-mail e, por "
+                "consequência, a pasta para onde ele vai.",
+                size="2", color=colors.TEXT_SEC, font_family=BODY_FONT,
+            ),
+            rx.spacer(),
+            rx.cond(
+                DashboardState.prompt_no_padrao,
+                rx.badge("Padrão do sistema", color_scheme="gray", size="2"),
+                rx.badge(
+                    "Versão " + DashboardState.prompt_versao.to_string(),
+                    color_scheme="blue", size="2",
+                ),
+            ),
+            rx.button(
+                rx.cond(
+                    DashboardState.prompt_aberto,
+                    rx.icon(tag="chevron-up", size=16),
+                    rx.icon(tag="chevron-down", size=16),
+                ),
+                rx.cond(DashboardState.prompt_aberto, "Fechar", "Ver e editar"),
+                on_click=DashboardState.set_prompt_aberto(~DashboardState.prompt_aberto),
+                variant="soft", cursor="pointer", size="2",
+            ),
+            width="100%", align_items="center", spacing="3", wrap="wrap",
+        ),
+        rx.cond(
+            DashboardState.prompt_autoria != "",
+            rx.hstack(
+                rx.icon(tag="user-round", size=13, color=colors.TEXT_SEC),
+                rx.text(
+                    DashboardState.prompt_autoria, size="1", color=colors.TEXT_SEC,
+                    font_family=BODY_FONT,
+                ),
+                spacing="2", align_items="center", margin_top="0.5rem",
+            ),
+        ),
+        rx.cond(
+            DashboardState.prompt_aberto,
+            rx.vstack(
+                rx.callout(
+                    "Alterar este texto muda como os e-mails são classificados a "
+                    "partir da próxima execução. Os trechos entre chaves "
+                    "({janela_horas}, {_ABRE}, {_FECHA}, {REGRA_SEM_TRAVESSAO}) "
+                    "são substituídos automaticamente: apagá-los não quebra a "
+                    "execução, mas o agente perde a informação que eles trazem.",
+                    icon="info", color_scheme="blue", size="1",
+                    width="100%", margin_top="1rem",
+                ),
+                rx.text_area(
+                    value=DashboardState.prompt_texto,
+                    on_change=DashboardState.set_prompt_texto,
+                    width="100%", height="480px",
+                    font_family="ui-monospace, SFMono-Regular, Menlo, monospace",
+                    style={"fontSize": "12px", "lineHeight": "1.5"},
+                    resize="vertical",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Salvar prompt",
+                        on_click=DashboardState.salvar_prompt,
+                        background=colors.BTN_GRADIENT, color="white", cursor="pointer",
+                    ),
+                    rx.button(
+                        rx.icon(tag="rotate-ccw", size=14),
+                        "Descartar alterações",
+                        on_click=DashboardState.recarregar_prompt,
+                        variant="soft", color_scheme="gray", cursor="pointer",
+                    ),
+                    rx.spacer(),
+                    rx.button(
+                        rx.icon(tag="history", size=14),
+                        "Restaurar padrão",
+                        on_click=DashboardState.set_confirm_restaurar_prompt_open(True),
+                        disabled=DashboardState.prompt_no_padrao,
+                        variant="soft", color_scheme="amber", cursor="pointer",
+                    ),
+                    width="100%", spacing="3", margin_top="0.75rem", wrap="wrap",
+                ),
+                width="100%", spacing="3", align_items="start",
+            ),
+        ),
+        confirm_dialog(
+            open_var=DashboardState.confirm_restaurar_prompt_open,
+            on_open_change=DashboardState.set_confirm_restaurar_prompt_open,
+            title="Restaurar o prompt padrão?",
+            body=(
+                "O texto que está gravado será descartado e o classificador volta "
+                "a usar as instruções que vêm com o sistema.\n\n"
+                "A alteração vale na próxima execução. Não é possível desfazer: "
+                "se quiser guardar a versão atual, copie o texto antes."
+            ),
+            confirm_label="Restaurar padrão",
+            on_confirm=DashboardState.restaurar_prompt_padrao,
         ),
     )
 
@@ -688,10 +875,13 @@ def dashboard_page() -> rx.Component:
             _metricas(),
             _zerar(),
             _acao(),
+            _estado_do_agendador(),
             _progresso(),
             _urgencias(),
             rx.box(height="1.5rem"),
             _configuracao(),
+            rx.box(height="1.5rem"),
+            _prompt_classificador(),
             rx.box(height="1.5rem"),
             _pastas(),
             rx.box(height="1.5rem"),

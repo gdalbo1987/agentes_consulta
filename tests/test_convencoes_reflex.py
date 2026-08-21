@@ -63,6 +63,8 @@ def test_campos_de_formulario_do_dashboard_tem_setter():
         "set_lookback_horas", "set_filtro_data_inicio", "set_filtro_data_fim",
         "set_filtro_apenas_urgentes", "set_filtro_apenas_importantes",
         "set_pasta_input", "set_detalhe_aberto",
+        "set_prompt_texto", "set_prompt_aberto",
+        "set_confirm_restaurar_prompt_open",
     ):
         assert campo in declarados, f"falta o setter {campo} no DashboardState"
 

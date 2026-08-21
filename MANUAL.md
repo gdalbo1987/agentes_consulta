@@ -360,6 +360,58 @@ tela. Eles mexem num interruptor só e não têm como desfazer horário nenhum, 
 travar um "Parar" por causa de uma tela velha impediria alguém de frear o agente
 pelo motivo errado.
 
+### Por que o automático não rodou
+
+Abaixo dos botões o painel mostra sempre a **última verificação** do agendador,
+que acontece a cada 10 minutos. É ali que está a resposta, e ela tem três
+formas:
+
+| O que aparece | O que significa |
+|---|---|
+| "Última verificação há 4 min. Nada a fazer: nenhum horário vencido." | Está tudo certo. O agente conferiu e não era hora de rodar. |
+| Faixa amarela: "As execuções automáticas estão PARADAS." | Alguém apertou Parar. **Salvar os horários não liga o agente.** Use o botão Iniciar, que fica na própria faixa. |
+| Faixa vermelha: "A última verificação foi há 50 min... o servidor precisa ser verificado." | O processo não está acordando. Nenhum botão desta tela resolve: chame quem cuida do servidor. |
+
+Essa distinção existe porque os três casos eram o mesmo silêncio antes, e foi
+por isso que a caixa passou dias sem ser classificada sem ninguém entender o
+motivo.
+
+Quando uma execução automática termina em erro (a OpenAI fora do ar, a internet
+caindo), a mensagem do erro também aparece ali, com o horário.
+
+### O prompt do classificador
+
+O card **Instruções do classificador** mostra e permite editar o texto que
+decide a classe de cada e-mail e, por consequência, a pasta para onde ele vai.
+Ele nasce fechado; clique em "Ver e editar".
+
+Qualquer usuário pode editar, não só o super admin. É proposital: quem conhece
+o vocabulário da casa é quem convive com os e-mails.
+
+Ao salvar:
+
+- o texto passa a valer **na próxima execução**, sem reiniciar nada;
+- o card passa a mostrar **"Versão N"** no lugar de "Padrão do sistema";
+- fica registrado **quem salvou e quando**, embaixo do título;
+- a ação entra no log de atividades, visível em `/admin`.
+
+Os trechos entre chaves (`{janela_horas}`, `{_ABRE}`, `{_FECHA}`,
+`{REGRA_SEM_TRAVESSAO}`) são substituídos automaticamente na hora de usar.
+Apagá-los não quebra a execução, mas o agente perde a informação que eles
+carregam, então mantenha-os salvo se souber o que está fazendo.
+
+Três saídas quando algo der errado:
+
+- **Descartar alterações** joga fora o que está na caixa e recarrega o que está
+  gravado.
+- **Restaurar padrão** volta ao texto que vem com o sistema. Ele não pode ser
+  desfeito, então copie o texto atual antes se quiser guardá-lo.
+- Se um colega salvar enquanto você edita, o seu Salvar é **recusado**, com o
+  nome de quem salvou, pelo mesmo motivo da configuração: aqui o que se perderia
+  não é um horário, é uma calibragem inteira.
+
+O prompt não pode ficar vazio. Para voltar ao original, use Restaurar padrão.
+
 ### Pastas do Outlook
 
 Uma linha por classe. Você digita o **nome** da pasta e clica em "Vincular"; o

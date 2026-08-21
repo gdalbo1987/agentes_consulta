@@ -497,6 +497,45 @@ class PastaUI(BaseModel):
     erro_resolucao: str
 
 
+# Sem batimento por mais que isto, o agendador não está apenas parado: ele não
+# está acordando. É o triplo do intervalo do supervisor, para que uma passagem
+# atrasada não vire alarme falso.
+_SEM_SINAL_MINUTOS = 35
+
+
+def _batimento_agendador(cfg: dict) -> tuple:
+    """Frase de "quando o agendador acordou e o que decidiu", mais o alerta.
+
+    Devolve `(texto, sem_sinal)`. `sem_sinal` distingue os dois silêncios que a
+    tela confundia: "está parado porque alguém apertou Parar", que se resolve
+    num clique, e "o processo não está acordando", que não se resolve pela tela
+    nenhuma e precisa de quem cuida do servidor.
+    """
+    quando = cfg.get("ultimo_tick_em")
+    resultado = (cfg.get("ultimo_tick_resultado") or "").strip()
+
+    if not quando:
+        return (
+            "O agendador ainda não registrou nenhuma verificação. Se o servidor "
+            "acabou de subir, a primeira acontece em alguns minutos.",
+            True,
+        )
+
+    minutos = max(0, int((brt_now() - quando).total_seconds() // 60))
+    carimbo = quando.strftime("%d/%m às %H:%M")
+
+    if minutos > _SEM_SINAL_MINUTOS:
+        return (
+            f"A última verificação automática foi em {carimbo}, há {minutos} min. "
+            "O agendador deveria acordar a cada 10 min, então ele não está "
+            "rodando: o servidor precisa ser verificado.",
+            True,
+        )
+
+    quanto = "agora há pouco" if minutos < 2 else f"há {minutos} min"
+    return (f"Última verificação {quanto} ({carimbo}). {resultado}".strip(), False)
+
+
 def _autoria_config(cfg: dict) -> str:
     """Frase de "quem configurou por último", pronta para a tela.
 
@@ -585,7 +624,27 @@ class DashboardState(AppState):
     config_aviso: str = ""
     # Interruptor do AGENDADO. Não desabilita "Classificar agora".
     agendamento_ativo: bool = False
+    # O que o agendador decidiu na última vez que acordou, e há quanto tempo.
+    # É o que responde "por que não rodou?" sem que ninguém precise abrir log
+    # de servidor.
+    agendador_batimento: str = ""
+    # Verdadeiro quando não há batimento recente. Significa coisa diferente de
+    # "está parado": aqui o processo que deveria acordar não acordou, e nenhum
+    # botão da tela resolve. Precisa de quem cuida do servidor.
+    agendador_sem_sinal: bool = False
     confirm_zerar_open: bool = False
+
+    # --- prompt do classificador ---
+    # O card nasce FECHADO. São quase 18 mil caracteres: aberto por padrão, ele
+    # empurraria a tabela de e-mails para fora da tela de quem só quer ver o
+    # que chegou hoje.
+    prompt_aberto: bool = False
+    prompt_texto: str = ""
+    prompt_versao: int = 0
+    prompt_no_padrao: bool = True
+    prompt_autoria: str = ""
+    prompt_salvando: bool = False
+    confirm_restaurar_prompt_open: bool = False
 
     # --- pastas ---
     pastas: List[PastaUI] = []
@@ -663,6 +722,15 @@ class DashboardState(AppState):
     def set_confirm_excluir_open(self, value: bool):
         self.confirm_excluir_open = value
 
+    def set_prompt_aberto(self, value: bool):
+        self.prompt_aberto = value
+
+    def set_prompt_texto(self, value: str):
+        self.prompt_texto = value
+
+    def set_confirm_restaurar_prompt_open(self, value: bool):
+        self.confirm_restaurar_prompt_open = value
+
     def limpar_filtros(self):
         self.filtro_data_inicio = ""
         self.filtro_data_fim = ""
@@ -686,6 +754,7 @@ class DashboardState(AppState):
         classificacao_config.ensure_pastas(self.tenant_id)
 
         self._aplicar_config(classificacao_config.get_config(self.tenant_id))
+        self._aplicar_prompt()
 
         self.pastas = [
             PastaUI(
@@ -721,6 +790,7 @@ class DashboardState(AppState):
         self.config_autoria = _autoria_config(cfg)
 
         self.config_versao = int(cfg.get("versao", 0))
+        self.agendador_batimento, self.agendador_sem_sinal = _batimento_agendador(cfg)
         # A tela acabou de ler o estado corrente, então não há mais nada
         # pendente para avisar.
         self.config_desatualizada = False
@@ -728,6 +798,85 @@ class DashboardState(AppState):
 
         proxima = classificacao_config.proxima_execucao(brt_now(), cfg)
         self.proxima_execucao = proxima.strftime("%d/%m/%Y %H:%M") if proxima else "-"
+
+    def _aplicar_prompt(self):
+        """Carrega o prompt em vigor para a caixa de edição."""
+        from sales_support_agent.services import prompts
+
+        dados = prompts.get_prompt(self.tenant_id, "classificacao")
+        self.prompt_texto = dados["texto"]
+        self.prompt_versao = dados["versao"]
+        self.prompt_no_padrao = dados["no_padrao"]
+        self.prompt_autoria = _autoria_config(dados)
+
+    def salvar_prompt(self):
+        """Grava uma versão nova do prompt do classificador.
+
+        Sem gate de super admin, de propósito: quem convive com os e-mails é
+        quem sabe que "PI" quer dizer pedido interno nesta casa, e esperar por
+        um administrador para corrigir uma regra de classificação é o que faz a
+        calibragem nunca acontecer. O que protege não é restringir quem edita,
+        e sim o registro de quem editou, a versão e o botão de voltar ao padrão.
+        """
+        from sales_support_agent.services import prompts
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        try:
+            nova_versao = prompts.salvar_prompt(
+                self.tenant_id,
+                "classificacao",
+                self.prompt_texto,
+                autor_nome=self.user_name,
+                autor_email=self.user_email,
+                versao_esperada=self.prompt_versao,
+            )
+        except prompts.PromptDesatualizado as conflito:
+            return toast_error(conflito.mensagem)
+        except ValueError as invalido:
+            return toast_error(str(invalido))
+
+        with rx.session() as session:
+            self.log_activity(
+                "PROMPT_CLASSIFICACAO",
+                f"Prompt do classificador salvo como versão {nova_versao} "
+                f"({len(self.prompt_texto.strip())} caracteres).",
+                session,
+            )
+
+        self._aplicar_prompt()
+        return toast_success(
+            f"Prompt salvo como versão {nova_versao}. Ele já vale na próxima "
+            "classificação, sem reiniciar o servidor."
+        )
+
+    def restaurar_prompt_padrao(self):
+        """Volta ao texto que vem no código."""
+        from sales_support_agent.services import prompts
+
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+
+        prompts.restaurar_padrao(self.tenant_id, "classificacao")
+
+        with rx.session() as session:
+            self.log_activity(
+                "PROMPT_CLASSIFICACAO",
+                "Prompt do classificador restaurado para o padrão do sistema.",
+                session,
+            )
+
+        self.confirm_restaurar_prompt_open = False
+        self._aplicar_prompt()
+        return toast_success("Prompt restaurado para o padrão do sistema.")
+
+    def recarregar_prompt(self):
+        """Descarta a edição na tela e relê o que está gravado."""
+        if not self.is_authenticated:
+            return rx.redirect("/login")
+        self._aplicar_prompt()
+        return toast_success("Prompt recarregado.")
 
     def recarregar_configuracao(self):
         """Botão do aviso "outra pessoa alterou".
@@ -1274,11 +1423,26 @@ class DashboardState(AppState):
 
         Um caminho de código só é o que faz este botão ser um teste de verdade
         do que roda sozinho às 08:00.
+
+        O corpo inteiro vive dentro de um `try/finally`, e isso não é zelo
+        genérico. Sem ele, uma exceção no meio da rodada (a OpenAI devolvendo
+        erro, a internet caindo no meio de uma chamada ao Graph) abandonava o
+        handler com `is_running=True` e `_manual_em_curso=True` no State. A
+        sondagem respeita `_manual_em_curso` de propósito, então ela nunca mais
+        limpava a flag, e o botão ficava recusando com "já existe uma
+        classificação em andamento" até a pessoa recarregar a página, sem que
+        houvesse rodada nenhuma no banco. Era o defeito que travava o botão.
         """
         async with self:
-            if self.is_running:
-                yield toast_error("Já existe uma classificação em andamento.")
-                return
+            ja_rodando = self.is_running
+            tenant_id_atual = self.tenant_id
+        if ja_rodando:
+            from sales_support_agent.services import classificacao as _c
+
+            yield toast_error(_c.descrever_rodada_em_andamento(tenant_id_atual))
+            return
+
+        async with self:
             tenant_id = self.tenant_id
             user_email = self.user_email
             self.is_running = True
@@ -1299,34 +1463,42 @@ class DashboardState(AppState):
                 self.is_running = False
                 self._manual_em_curso = False
                 self.progresso_texto = ""
-            yield toast_error("Já existe uma classificação em andamento.")
+            yield toast_error(classificacao.descrever_rodada_em_andamento(tenant_id))
             return
 
         resumo, erro = None, ""
-        async for evento in classificacao.stream_classificacao(
-            tenant_id, user_email=user_email, origem="manual", run_id=run_id
-        ):
-            if evento[0] == "progress":
-                async with self:
-                    self.progresso_atual = evento[1]
-                    self.progresso_total = evento[2]
-                    self.progresso_texto = evento[3]
-            elif evento[0] == "done":
-                resumo = evento[1]
-            elif evento[0] == "error":
-                erro = evento[1]
-
-        # A barra só sai DEPOIS daqui. `finalizar_rodada` é o que grava
-        # contadores, duração e o consumo de tokens: enquanto ela não volta, a
-        # rodada não terminou, mesmo com todos os e-mails já classificados e
-        # resumidos.
-        agendador.finalizar_rodada(run_id, resumo or {}, erro)
+        try:
+            async for evento in classificacao.stream_classificacao(
+                tenant_id, user_email=user_email, origem="manual", run_id=run_id
+            ):
+                if evento[0] == "progress":
+                    async with self:
+                        self.progresso_atual = evento[1]
+                        self.progresso_total = evento[2]
+                        self.progresso_texto = evento[3]
+                elif evento[0] == "done":
+                    resumo = evento[1]
+                elif evento[0] == "error":
+                    erro = evento[1]
+        except Exception as exc:  # noqa: BLE001
+            # Vira erro da RODADA, não exceção perdida. O que a pessoa precisa
+            # saber é que a execução dela parou e por quê, e a linha no banco
+            # precisa fechar: deixá-la em `running` bloquearia a próxima por
+            # vinte minutos sem motivo.
+            erro = f"A execução foi interrompida: {exc}"
+        finally:
+            # A barra só sai DEPOIS daqui. `finalizar_rodada` é o que grava
+            # contadores, duração e o consumo de tokens: enquanto ela não
+            # volta, a rodada não terminou, mesmo com todos os e-mails já
+            # classificados e resumidos.
+            agendador.finalizar_rodada(run_id, resumo or {}, erro)
+            async with self:
+                self.is_running = False
+                self._manual_em_curso = False
+                self.progresso_texto = ""
 
         r = resumo or {}
         async with self:
-            self.is_running = False
-            self._manual_em_curso = False
-            self.progresso_texto = ""
             # Esta sessão já deu o recado desta rodada. Sem marcar, a sondagem
             # a veria terminar e mostraria o mesmo aviso uma segunda vez.
             self._ultima_run_vista = run_id

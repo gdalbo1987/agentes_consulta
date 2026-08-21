@@ -351,6 +351,19 @@ class ClassificacaoConfig(SQLModel, table=True):
     # Marca do último disparo AGENDADO, para o mesmo horário não rodar duas
     # vezes no mesmo dia.
     ultima_execucao_agendada: Optional[datetime] = None
+
+    # Batimento do agendador: quando ele acordou pela última vez e o que
+    # decidiu. Existe porque a falha real em produção não foi o agendador
+    # quebrar, e sim ele decidir CORRETAMENTE não rodar (o interruptor estava
+    # desligado) sem deixar rastro nenhum. `_tick` saía em silêncio, e o
+    # usuário ficava sem saber se o agente tinha travado, dado erro, ou
+    # simplesmente não tinha nada a fazer.
+    #
+    # Com estas duas colunas, o painel mostra "verifiquei às 16:00 e não rodei
+    # porque X", e a AUSÊNCIA de batimento recente passa a ser o sinal de que o
+    # processo caiu, que é uma informação diferente e igualmente importante.
+    ultimo_tick_em: Optional[datetime] = None
+    ultimo_tick_resultado: str = Field(default="")
     updated_at: datetime = Field(default_factory=brt_now)
 
     # Quem salvou por último, e como se chamava na hora. A configuração é da
@@ -375,6 +388,44 @@ class ClassificacaoConfig(SQLModel, table=True):
     # existe para pegar. O contador é exato e monotônico, sem depender da
     # resolução do relógio.
     versao: int = Field(default=0)
+
+
+class PromptAgente(SQLModel, table=True):
+    """As instruções de um agente, editáveis pela organização.
+
+    Uma linha por (tenant, chave). Hoje só a chave "classificacao" é editável:
+    é o prompt que decide para qual pasta cada e-mail vai, e é o que a equipe
+    precisa calibrar sem esperar por um deploy.
+
+    O texto vive no BANCO e não em arquivo por dois motivos. Editar arquivo
+    exigiria acesso ao servidor e reinício, o que tira a calibragem das mãos de
+    quem convive com os e-mails. E o banco dá de graça o que a auditoria exige
+    aqui: quem mudou, quando, e em que versão, que é justamente o que se quer
+    olhar quando a classificação piora de um dia para o outro.
+
+    Linha ausente significa "usando o padrão do código", e não "sem prompt":
+    `prompts.texto_em_vigor` cai em `classificacao_agent.PROMPT_PADRAO`. É o que
+    faz uma instalação nova funcionar sem seed de prompt, e o que faz o botão
+    "Restaurar padrão" ser um DELETE simples em vez de uma cópia de texto que
+    envelheceria em silêncio a cada mudança no código.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenant.id", index=True)
+    chave: str = Field(index=True)
+
+    texto: str = Field(sa_column=Column(Text))
+
+    # Contador de edições, pelo mesmo motivo da `ClassificacaoConfig.versao`:
+    # `brt_now()` trunca em segundos e não serve para distinguir duas
+    # gravações no mesmo segundo. Aqui ele acumula a função de RÓTULO: é a
+    # "versão do prompt" que o painel exibe.
+    versao: int = Field(default=1)
+    atualizado_por_nome: str = Field(default="")
+    atualizado_por_email: str = Field(default="")
+    updated_at: datetime = Field(default_factory=brt_now)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "chave", name="uq_prompt_tenant_chave"),)
 
 
 class PastaClasse(SQLModel, table=True):
