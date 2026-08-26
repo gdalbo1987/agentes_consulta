@@ -500,6 +500,43 @@ def test_o_supervisor_e_registrado_com_o_tick_como_alvo():
     assert "id=_JOB_SUPERVISOR" in fonte
 
 
+def test_o_lock_da_rodada_e_de_transacao_e_nunca_de_sessao():
+    """Guarda de CÓDIGO, porque nenhum teste de runtime aqui pega isto.
+
+    A suíte roda em SQLite, que não tem advisory lock: `reivindicar_rodada`
+    pula o bloco inteiro. Por isso o defeito sobreviveu com a suíte verde, e
+    até `test_depois_de_finalizada_uma_nova_rodada_pode_comecar`, que exercita
+    exatamente manual -> finalizar -> agendado, passava com ele presente.
+
+    O QUE ESTAVA ERRADO. `pg_try_advisory_lock` prende o lock à CONEXÃO, e
+    soltá-lo exige `pg_advisory_unlock` na mesma conexão. Só que o
+    `session.commit()` da reivindicação devolve a conexão ao pool, e a
+    instrução seguinte pega outra. Durante uma execução manual o pool está em
+    uso (progresso a cada e-mail, sondagem do painel a cada 3s), então o unlock
+    ia para a conexão errada, devolvia `false` em silêncio, e o lock ficava
+    preso. Toda tentativa posterior, agendada ou manual, era recusada com "já
+    existe uma classificação em andamento" até reiniciar o servidor.
+
+    `pg_try_advisory_xact_lock` não tem como vazar: o PostgreSQL solta no
+    COMMIT ou no ROLLBACK, independentemente do pool.
+    """
+    fonte = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "sales_support_agent" / "services" / "agendador.py"
+    ).read_text(encoding="utf-8")
+
+    assert "pg_try_advisory_xact_lock" in fonte
+
+    # A forma de sessão não pode voltar, nem o unlock manual que ela exige.
+    codigo = [
+        linha for linha in fonte.splitlines()
+        if "pg_" in linha and not linha.strip().startswith("#")
+        and "`" not in linha  # ignora as menções em docstring
+    ]
+    assert not [l for l in codigo if "pg_try_advisory_lock(" in l], codigo
+    assert not [l for l in codigo if "pg_advisory_unlock" in l], codigo
+
+
 def test_o_agendador_sobe_pelo_lifespan_e_nao_no_import():
     """A distinção que impede `reflex compile` de levantar um agendador.
 

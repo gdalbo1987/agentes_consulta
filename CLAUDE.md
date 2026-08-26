@@ -440,10 +440,14 @@ Três defesas contra disparo duplicado, porque nenhuma sozinha basta:
    relógio.
 2. Verificação no startup, além do gatilho no horário. Dá recuperação de graça:
    máquina desligada às 08:00 e servidor subindo às 09:20 ainda roda o horário 1.
-3. `pg_try_advisory_lock` na reivindicação da rodada, cobrindo a corrida entre o
+3. `pg_try_advisory_xact_lock` na reivindicação da rodada, cobrindo a corrida entre o
    botão manual e o job agendado, e o cenário de múltiplos workers. É mais forte
    que a flag `is_running` do State, que vive por sessão de browser e é
-   invisível para a CLI. O lock morre com a conexão, então não substitui a
+   invisível para a CLI. É de TRANSAÇÃO e não de sessão: a variante de sessão
+   prende o lock à CONEXÃO e exige unlock explícito nela, coisa que um pool não
+   garante. Com ela, o `commit` devolvia a conexão ao pool e o unlock ia para
+   outra, deixando o lock preso e matando o agendamento depois de qualquer
+   execução manual. O lock morre com a transação, então não substitui a
    recuperação de rodada travada de 20 minutos.
 
 **Toda passagem do `_tick` grava o que decidiu** em

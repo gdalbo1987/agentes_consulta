@@ -16,15 +16,19 @@ Três defesas contra disparo duplicado, porque nenhuma sozinha basta:
    recuperação de graça: se a máquina estava desligada às 08:00 e o servidor
    sobe às 09:20, o horário 1 ainda consta como não disparado e a rodada
    acontece. Um gatilho que só olha o instante exato teria perdido a janela.
-3. **Advisory lock do PostgreSQL** (`pg_try_advisory_lock`), na hora de
-   reivindicar a rodada. Cobre a corrida entre o botão manual e o job agendado,
-   e também o cenário de mais de um worker, em que cada um levantaria o seu
-   agendador. É mais forte que a flag `is_running` do State, que existe por
-   sessão de browser e é invisível para a CLI.
+3. **Advisory lock de TRANSAÇÃO do PostgreSQL** (`pg_try_advisory_xact_lock`),
+   na hora de reivindicar a rodada. Cobre a corrida entre o botão manual e o
+   job agendado, e também o cenário de mais de um worker, em que cada um
+   levantaria o seu agendador. É mais forte que a flag `is_running` do State,
+   que existe por sessão de browser e é invisível para a CLI.
 
-O advisory lock morre com a conexão, então ele não substitui a recuperação de
-rodada travada de 20 minutos: um processo morto no meio do caminho solta o lock
-mas deixa a linha em `running`.
+   De TRANSAÇÃO, e não de sessão: a variante de sessão prende o lock à conexão
+   e exige unlock explícito na mesma conexão, coisa que um pool não garante.
+   Ver `reivindicar_rodada`, que documenta a falha exata que isso causou.
+
+O lock morre com a transação, então ele não substitui a recuperação de rodada
+travada de 20 minutos: um processo morto no meio do caminho solta o lock mas
+deixa a linha em `running`.
 """
 
 import asyncio
@@ -38,7 +42,7 @@ from sales_support_agent.services import classificacao, classificacao_config
 
 log = logging.getLogger("sales_support_agent.agendador")
 
-# Um por tenant, derivado de um número fixo. `pg_try_advisory_lock` recebe um
+# Um por tenant, derivado de um número fixo. O lock consultivo recebe um
 # bigint; usar um literal mais o tenant evita colisão com qualquer outro lock
 # que o PostgreSQL venha a hospedar.
 _LOCK_BASE = 815_000_000
@@ -88,6 +92,26 @@ def reivindicar_rodada(
 
     Em SQLite (a suíte de testes) não há advisory lock; a checagem de rodada em
     andamento continua valendo, e a suíte é de processo único.
+
+    O LOCK É DE TRANSAÇÃO (`pg_try_advisory_xact_lock`), e NUNCA de sessão.
+    Esta distinção já custou a operação: com `pg_try_advisory_lock`, o lock
+    pertence à CONEXÃO, e soltá-lo exige um `pg_advisory_unlock` na mesma
+    conexão. Só que o `session.commit()` daqui devolve a conexão ao pool, e a
+    instrução seguinte pega outra: durante uma rodada manual, com o progresso
+    gravando a cada e-mail e o painel sondando a cada 3 segundos, o pool está
+    em uso e a chance de voltar a mesma conexão é baixa. O unlock ia para a
+    conexão errada, devolvia `false` em silêncio, e o lock ficava preso na
+    conexão original pelo resto da vida dela.
+
+    O efeito era o agendamento morrer depois de qualquer execução manual: toda
+    tentativa seguinte via `pg_try_advisory_lock` devolver `false`, concluía
+    "já existe uma classificação em andamento" e saía, para sempre, até
+    reiniciar o servidor. O botão manual travava junto, pelo mesmo motivo.
+
+    O lock de transação não tem como vazar: o PostgreSQL o solta no COMMIT ou
+    no ROLLBACK, aconteça o que acontecer com o pool. E ele solta exatamente no
+    instante em que a linha nova fica visível para as outras transações, então
+    não existe janela em que o lock esteja livre e a rodada ainda invisível.
     """
     classificacao.recuperar_rodada_travada(tenant_id)
 
@@ -96,39 +120,32 @@ def reivindicar_rodada(
             from sqlalchemy import text
 
             obteve = session.execute(
-                text("SELECT pg_try_advisory_lock(:chave)"), {"chave": _LOCK_BASE + tenant_id}
+                text("SELECT pg_try_advisory_xact_lock(:chave)"),
+                {"chave": _LOCK_BASE + tenant_id},
             ).scalar()
             if not obteve:
                 log.info("Outra execução já detém o lock; esta sai sem fazer nada.")
                 return None
 
-        try:
-            em_andamento = (
-                session.query(ClassificacaoRun)
-                .filter(
-                    ClassificacaoRun.tenant_id == tenant_id,
-                    ClassificacaoRun.status == "running",
-                )
-                .first()
+        em_andamento = (
+            session.query(ClassificacaoRun)
+            .filter(
+                ClassificacaoRun.tenant_id == tenant_id,
+                ClassificacaoRun.status == "running",
             )
-            if em_andamento:
-                return None
+            .first()
+        )
+        if em_andamento:
+            # Sem commit: o rollback do fechamento solta o lock sozinho.
+            return None
 
-            rodada = ClassificacaoRun(
-                tenant_id=tenant_id, origem=origem, slot=slot, user_email=user_email
-            )
-            session.add(rodada)
-            session.commit()
-            session.refresh(rodada)
-            return rodada.id
-        finally:
-            if _e_postgres(session):
-                from sqlalchemy import text
-
-                session.execute(
-                    text("SELECT pg_advisory_unlock(:chave)"), {"chave": _LOCK_BASE + tenant_id}
-                )
-                session.commit()
+        rodada = ClassificacaoRun(
+            tenant_id=tenant_id, origem=origem, slot=slot, user_email=user_email
+        )
+        session.add(rodada)
+        session.commit()
+        session.refresh(rodada)
+        return rodada.id
 
 
 def finalizar_rodada(run_id: int, resumo: dict, erro: str = "") -> None:
