@@ -45,6 +45,7 @@ from sales_support_agent.services.classificacao_rules import (
     calcular_prioridade,
     clamp_confianca,
 )
+from sales_support_agent.services.corpo_email import extrair_mensagem_nova
 from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
 from sales_support_agent.services.settings import get_agent_config
 
@@ -465,8 +466,19 @@ def _error_message(exc: Exception) -> str:
 
 
 def _build_prompt(email: dict) -> str:
-    """Monta o prompt com o conteúdo de terceiro isolado entre delimitadores."""
+    """Monta o prompt com o conteúdo de terceiro isolado entre delimitadores.
+
+    O corpo entra RECORTADO: só a mensagem nova, sem a thread citada abaixo
+    dela. As regras de classificação são gatilhos textuais, e um gatilho citado
+    no histórico ("abrir PI", "prazo: 19/08", "está atrasado") vale tanto quanto
+    o mesmo gatilho escrito agora, o que fazia o e-mail ser classificado pelo
+    que alguém pediu semanas atrás e um prazo já vencido virar urgência de hoje.
+    A truncagem de `sanear_corpo` limita o texto por tamanho e não resolve isso.
+    O recorte é conservador: sem marcador reconhecido, ou quando cortar
+    esvaziaria o corpo, o texto inteiro passa. Ver `services/corpo_email.py`.
+    """
     recebido = email.get("recebido_em")
+    corpo = extrair_mensagem_nova(email.get("corpo_texto") or "")
     return (
         "Classifique o e-mail abaixo.\n\n"
         f"Recebido em: {recebido:%d/%m/%Y %H:%M} (horário de Brasília)\n"
@@ -474,7 +486,7 @@ def _build_prompt(email: dict) -> str:
         f"<{email.get('remetente_email') or 'sem endereço'}>\n"
         f"Assunto: {email.get('assunto') or '(sem assunto)'}\n\n"
         f"{_ABRE}\n"
-        f"{email.get('corpo_texto') or '(corpo vazio)'}\n"
+        f"{corpo or '(corpo vazio)'}\n"
         f"{_FECHA}\n"
     )
 

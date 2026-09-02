@@ -28,6 +28,7 @@ from agents import Agent, ModelSettings, Runner
 from openai.types.shared import Reasoning
 
 from sales_support_agent.services.classificacao_rules import rotulo
+from sales_support_agent.services.corpo_email import extrair_mensagem_nova
 from sales_support_agent.services.prompt_rules import REGRA_SEM_TRAVESSAO
 from sales_support_agent.services.settings import get_agent_config
 
@@ -118,7 +119,16 @@ def _error_message(exc: Exception) -> str:
 
 
 def _build_prompt(email: dict, classe: str) -> str:
+    """O corpo entra recortado, igual ao do Agente 1.
+
+    Mesmo motivo, um degrau adiante: com a thread citada junto, `resumo`,
+    `pontos_chave` e `acao_sugerida` descreviam a conversa inteira em vez da
+    mensagem que chegou, e `prazo_mencionado` capturava prazo de rodada
+    anterior, muitas vezes já vencido. Como este texto vai direto para a tela,
+    o erro chegava ao usuário sem filtro. Ver `services/corpo_email.py`.
+    """
     recebido = email.get("recebido_em")
+    corpo = extrair_mensagem_nova(email.get("corpo_texto") or "")
     return (
         f"Resuma este e-mail, já classificado como: {rotulo(classe)}.\n\n"
         f"Recebido em: {recebido:%d/%m/%Y %H:%M} (horário de Brasília)\n"
@@ -126,7 +136,7 @@ def _build_prompt(email: dict, classe: str) -> str:
         f"<{email.get('remetente_email') or 'sem endereço'}>\n"
         f"Assunto: {email.get('assunto') or '(sem assunto)'}\n\n"
         f"{_ABRE}\n"
-        f"{email.get('corpo_texto') or '(corpo vazio)'}\n"
+        f"{corpo or '(corpo vazio)'}\n"
         f"{_FECHA}\n"
     )
 

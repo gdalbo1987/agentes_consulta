@@ -202,6 +202,28 @@ retorno em `(ok, resultado, erro_em_portugues, usage)`.
 Modelo e esforço vêm de `AgentModelSetting`, com as chaves
 `("classificacao", "resumo", "consulta")` em `services/settings.AGENT_KEYS`.
 
+**Os Agentes 1 e 2 recebem só a mensagem NOVA, nunca a thread citada.**
+`services/corpo_email.extrair_mensagem_nova` corta o corpo no primeiro marcador
+de histórico (o bloco `De:/Enviada em:/Assunto:`, a régua de sublinhados do
+Exchange, `-----Mensagem original-----`, `Fulano escreveu:`, linha começando com
+`>`) e os dois `_build_prompt` usam o recorte. A truncagem de `LIMITE_CORPO`
+limita o corpo por TAMANHO e não resolve isto: as regras de classificação são
+gatilhos textuais ("abrir PI", "PEDIDO EQUALIZADO", "prazo: 19/08"), e um
+gatilho citado no rodapé da thread valia tanto quanto o mesmo gatilho escrito
+agora, o que classificava o e-mail pelo que alguém pediu semanas atrás e fazia
+prazo já vencido virar urgência de hoje. No Agente 2 o mesmo defeito ia direto
+para a tela, no resumo e na ação sugerida.
+
+O recorte é heurístico e por isso é conservador NOS DOIS SENTIDOS: sem marcador
+reconhecido o texto passa inteiro, e corte que esvaziaria o corpo é desfeito
+(encaminhamento sem comentário começa direto no cabeçalho citado, e ali o
+conteúdo encaminhado É a mensagem). Ele não tenta remover assinatura: sobra que
+seja só assinatura é caso previsto, porque o prompt já manda decidir pelo
+assunto quando o corpo é neutro. `EmailClassificado.corpo_texto` continua
+guardando o corpo COMPLETO: o recorte vale só na montagem do prompt, o arquivo
+do e-mail segue fiel, e a busca do Agente 3 já usa assunto e resumo, nunca o
+corpo cru.
+
 ### Agente 1, classificação
 
 `classe` é um `Literal` sobre a tupla de classes, o que faz o JSON Schema virar
