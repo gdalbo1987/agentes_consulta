@@ -21,5 +21,14 @@ config = rx.Config(
         # preto — as seções que não declaram fundo próprio (vantagens,
         # tutorial) ficam escuras com texto escuro.
         rx.plugins.RadixThemesPlugin(theme=rx.theme(appearance="light")),
-    ]
+    ],
+    backend_host="0.0.0.0",
+    backend_port=8200,
+
+    frontend_port=3200,
+    frontend_host="0.0.0.0",
+
+    vite_allowed_hosts=[
+        "agentesconsulta.coester.com.br",
+    ],
 )
